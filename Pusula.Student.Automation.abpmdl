@@ -1,0 +1,108 @@
+{
+  "template": "app",
+  "imports": {
+    "Volo.Abp.LeptonXLiteTheme": {
+      "version": "4.3.5",
+      "isInstalled": true
+    },
+    "Volo.Abp.Account": {
+      "version": "9.3.5",
+      "isInstalled": true,
+      "creationTime": "11/06/2025 16:12:00 +00:00"
+    },
+    "Volo.Abp.OpenIddict": {
+      "version": "9.3.5",
+      "isInstalled": true,
+      "creationTime": "11/06/2025 16:12:00 +00:00"
+    },
+    "Volo.Abp.Identity": {
+      "version": "9.3.5",
+      "isInstalled": true,
+      "creationTime": "11/06/2025 16:12:00 +00:00"
+    },
+    "Volo.Abp.TenantManagement": {
+      "version": "9.3.5",
+      "isInstalled": true,
+      "creationTime": "11/06/2025 16:12:00 +00:00"
+    },
+    "Volo.Abp.SettingManagement": {
+      "version": "9.3.5",
+      "isInstalled": true,
+      "creationTime": "11/06/2025 16:12:00 +00:00"
+    },
+    "Volo.Abp.PermissionManagement": {
+      "version": "9.3.5",
+      "isInstalled": true,
+      "creationTime": "11/06/2025 16:12:00 +00:00"
+    },
+    "Volo.Abp.FeatureManagement": {
+      "version": "9.3.5",
+      "isInstalled": true,
+      "creationTime": "11/06/2025 16:12:00 +00:00"
+    }
+  },
+  "folders": {
+    "items": {
+      "src": {},
+      "test": {}
+    }
+  },
+  "packages": {
+    "Pusula.Student.Automation.Application": {
+      "path": "src/Pusula.Student.Automation.Application/Pusula.Student.Automation.Application.abppkg",
+      "folder": "src"
+    },
+    "Pusula.Student.Automation.Application.Tests": {
+      "path": "test/Pusula.Student.Automation.Application.Tests/Pusula.Student.Automation.Application.Tests.abppkg",
+      "folder": "test"
+    },
+    "Pusula.Student.Automation.Domain.Shared": {
+      "path": "src/Pusula.Student.Automation.Domain.Shared/Pusula.Student.Automation.Domain.Shared.abppkg",
+      "folder": "src"
+    },
+    "Pusula.Student.Automation.Application.Contracts": {
+      "path": "src/Pusula.Student.Automation.Application.Contracts/Pusula.Student.Automation.Application.Contracts.abppkg",
+      "folder": "src"
+    },
+    "Pusula.Student.Automation.HttpApi": {
+      "path": "src/Pusula.Student.Automation.HttpApi/Pusula.Student.Automation.HttpApi.abppkg",
+      "folder": "src"
+    },
+    "Pusula.Student.Automation.HttpApi.Client": {
+      "path": "src/Pusula.Student.Automation.HttpApi.Client/Pusula.Student.Automation.HttpApi.Client.abppkg",
+      "folder": "src"
+    },
+    "Pusula.Student.Automation.EntityFrameworkCore.Tests": {
+      "path": "test/Pusula.Student.Automation.EntityFrameworkCore.Tests/Pusula.Student.Automation.EntityFrameworkCore.Tests.abppkg",
+      "folder": "test"
+    },
+    "Pusula.Student.Automation.EntityFrameworkCore": {
+      "path": "src/Pusula.Student.Automation.EntityFrameworkCore/Pusula.Student.Automation.EntityFrameworkCore.abppkg",
+      "folder": "src"
+    },
+    "Pusula.Student.Automation.TestBase": {
+      "path": "test/Pusula.Student.Automation.TestBase/Pusula.Student.Automation.TestBase.abppkg",
+      "folder": "test"
+    },
+    "Pusula.Student.Automation.Domain.Tests": {
+      "path": "test/Pusula.Student.Automation.Domain.Tests/Pusula.Student.Automation.Domain.Tests.abppkg",
+      "folder": "test"
+    },
+    "Pusula.Student.Automation.HttpApi.Client.ConsoleTestApp": {
+      "path": "test/Pusula.Student.Automation.HttpApi.Client.ConsoleTestApp/Pusula.Student.Automation.HttpApi.Client.ConsoleTestApp.abppkg",
+      "folder": "test"
+    },
+    "Pusula.Student.Automation.DbMigrator": {
+      "path": "src/Pusula.Student.Automation.DbMigrator/Pusula.Student.Automation.DbMigrator.abppkg",
+      "folder": "src"
+    },
+    "Pusula.Student.Automation.Blazor": {
+      "path": "src/Pusula.Student.Automation.Blazor/Pusula.Student.Automation.Blazor.abppkg",
+      "folder": "src"
+    },
+    "Pusula.Student.Automation.Domain": {
+      "path": "src/Pusula.Student.Automation.Domain/Pusula.Student.Automation.Domain.abppkg",
+      "folder": "src"
+    }
+  }
+}

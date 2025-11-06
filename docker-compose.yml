@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: psa-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: myPassword
+      POSTGRES_DB: Automation
+      TZ: Europe/Istanbul
+    ports:
+      - "5442:5432"
+    volumes:
+      - pgdata_psa:/var/lib/postgresql/data
+
+  pgadmin:
+    image: dpage/pgadmin4:8
+    container_name: psa-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      TZ: Europe/Istanbul
+    ports:
+      - "5080:80"
+    depends_on:
+      - postgres
+
+volumes:
+  pgdata_psa:
