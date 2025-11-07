@@ -23,7 +23,8 @@ public class AutomationMenuContributor : IMenuContributor
     private Task ConfigureMainMenuAsync(MenuConfigurationContext context)
     {
         var l = context.GetLocalizer<AutomationResource>();
-        
+
+        // Home
         context.Menu.Items.Insert(
             0,
             new ApplicationMenuItem(
@@ -35,10 +36,22 @@ public class AutomationMenuContributor : IMenuContributor
             )
         );
 
-        //Administration
+        // Students (Admin menüsüne gerek kalmadan ana menüye ekliyoruz)
+        context.Menu.AddItem(
+            new ApplicationMenuItem(
+                "Automation.Students",
+                l["Menu:Students"],
+                url: "/admin/students",
+                icon: "fa fa-users",
+                order: 2,
+                requiredPermissionName: AutomationPermissions.Students.Default
+            )
+        );
+
+        // Administration
         var administration = context.Menu.GetAdministration();
         administration.Order = 6;
-    
+
         if (MultiTenancyConsts.IsEnabled)
         {
             administration.SetSubItemOrder(TenantManagementMenuNames.GroupName, 1);

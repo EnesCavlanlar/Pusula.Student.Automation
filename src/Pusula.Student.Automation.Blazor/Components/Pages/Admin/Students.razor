@@ -1,0 +1,152 @@
+﻿@page "/admin/students"
+@inject IStudentAppService StudentsApp
+@using Pusula.Student.Automation.Students
+@using Volo.Abp.Application.Dtos
+
+<h3>Students</h3>
+
+<div class="mb-3">
+    <button class="btn btn-primary" @onclick="ShowCreate">+ New Student</button>
+</div>
+
+@if (_loading)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Student No</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>BirthDate</th>
+                <th style="width:140px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var s in _items)
+            {
+                <tr>
+                    <td>@s.StudentNo</td>
+                    <td>@s.FirstName @s.LastName</td>
+                    <td>@s.Email</td>
+                    <td>@(s.BirthDate?.ToString("yyyy-MM-dd"))</td>
+                    <td>
+                        <button class="btn btn-sm btn-secondary me-2" @onclick="() => Edit(s)">Edit</button>
+                        <button class="btn btn-sm btn-danger" @onclick="() => Delete(s.Id)">Delete</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<!-- Create / Edit Modal (basit) -->
+@if (_showModal)
+{
+    <div class="modal fade show d-block" style="background:rgba(0,0,0,.5);" @onclick="CloseModal">
+        <div class="modal-dialog" @onclick:stopPropagation>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(_editId == null ? "Create Student" : "Edit Student")</h5>
+                    <button type="button" class="btn-close" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label">Student No</label>
+                        <input class="form-control" @bind="_form.StudentNo" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">First Name</label>
+                        <input class="form-control" @bind="_form.FirstName" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Last Name</label>
+                        <input class="form-control" @bind="_form.LastName" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Email</label>
+                        <input class="form-control" @bind="_form.Email" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Birth Date</label>
+                        <input class="form-control" type="date" @bind-value="_birthStr" @bind-value:event="oninput" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseModal">Cancel</button>
+                    <button class="btn btn-primary" @onclick="Save">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private List<StudentDto> _items = new();
+    private bool _showModal = false;
+    private Guid? _editId = null;
+    private CreateUpdateStudentDto _form = new();
+    private string? _birthStr;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var list = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
+        _items = list.Items.ToList();
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private void ShowCreate()
+    {
+        _editId = null;
+        _form = new();
+        _birthStr = null;
+        _showModal = true;
+    }
+
+    private void Edit(StudentDto s)
+    {
+        _editId = s.Id;
+        _form = new CreateUpdateStudentDto
+        {
+            StudentNo = s.StudentNo,
+            FirstName = s.FirstName,
+            LastName = s.LastName,
+            Email = s.Email,
+            BirthDate = s.BirthDate
+        };
+        _birthStr = s.BirthDate?.ToString("yyyy-MM-dd");
+        _showModal = true;
+    }
+
+    private async Task Save()
+    {
+        _form.BirthDate = string.IsNullOrWhiteSpace(_birthStr) ? null : DateTime.Parse(_birthStr);
+
+        if (_editId == null)
+            await StudentsApp.CreateAsync(_form);
+        else
+            await StudentsApp.UpdateAsync(_editId.Value, _form);
+
+        _showModal = false;
+        await LoadAsync();
+    }
+
+    private async Task Delete(Guid id)
+    {
+        await StudentsApp.DeleteAsync(id);
+        await LoadAsync();
+    }
+
+    private void CloseModal() => _showModal = false;
+}
