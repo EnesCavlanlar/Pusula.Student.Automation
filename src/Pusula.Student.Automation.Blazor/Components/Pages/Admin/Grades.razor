@@ -1,0 +1,163 @@
+﻿@page "/admin/grades"
+@using Volo.Abp.Application.Dtos
+@using Pusula.Student.Automation.Students
+@using Pusula.Student.Automation.Courses
+@using Pusula.Student.Automation.Enrollments
+@using Pusula.Student.Automation.Grades
+@inject IStudentAppService StudentsApp
+@inject ICourseAppService CoursesApp
+@inject IEnrollmentAppService EnrollmentsApp
+@inject IGradeAppService GradesApp
+
+<h3>Grades</h3>
+
+<div class="row g-2 mb-3">
+    <div class="col-md-6">
+        <label class="form-label">Course</label>
+        <select class="form-select"
+                @bind="_selectedCourseId"
+                @bind:after="OnCourseChanged">
+            <option value="@Guid.Empty">-- select course --</option>
+            @foreach (var c in _courses)
+            {
+                <option value="@c.Id">@c.Code - @c.Name</option>
+            }
+        </select>
+    </div>
+</div>
+
+@if (_selectedCourseId == Guid.Empty)
+{
+    <p class="text-muted">Please select a course.</p>
+}
+else if (_loading)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Student</th>
+                <th>Grade</th>
+                <th>Note</th>
+                <th style="width:180px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var row in _rows)
+            {
+                <tr>
+                    <td>@row.StudentName</td>
+                    <td style="width:140px;">
+                        <input type="number" class="form-control" min="0" max="100" @bind="row.Value" />
+                    </td>
+                    <td>
+                        <input class="form-control" @bind="row.Note" />
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-primary me-2" @onclick="() => SaveGrade(row)">Save</button>
+                        @if (row.GradeId != null)
+                        {
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteGrade(row)">Delete</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool _loading = true;
+    private List<StudentDto> _students = new();
+    private List<CourseDto> _courses = new();
+    private List<EnrollmentDto> _enrollments = new();
+    private List<GradeDto> _grades = new();
+
+    private Guid _selectedCourseId = Guid.Empty;
+    private List<GradeRow> _rows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var sl = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
+        _students = sl.Items.ToList();
+
+        var cl = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
+        _courses = cl.Items.ToList();
+
+        await LoadEnrollmentsAsync();
+    }
+
+    private async Task OnCourseChanged() => await LoadEnrollmentsAsync();
+
+    private async Task LoadEnrollmentsAsync()
+    {
+        _loading = true;
+
+        var el = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 2000 });
+        _enrollments = el.Items.Where(e => _selectedCourseId == Guid.Empty || e.CourseId == _selectedCourseId).ToList();
+
+        var gl = await GradesApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 2000 });
+        _grades = gl.Items.ToList();
+
+        _rows = _enrollments.Select(e =>
+        {
+            var st = _students.FirstOrDefault(s => s.Id == e.StudentId);
+            var g = _grades.FirstOrDefault(x => x.EnrollmentId == e.Id);
+
+            return new GradeRow
+            {
+                EnrollmentId = e.Id,
+                GradeId = g?.Id,
+                StudentName = st is null ? e.StudentId.ToString() : $"{st.StudentNo} - {st.FirstName} {st.LastName}",
+                Value = g?.GradeValue ?? 0,
+                Note = g?.Note
+            };
+        }).ToList();
+
+        _loading = false;
+    }
+
+    private async Task SaveGrade(GradeRow row)
+    {
+        if (row.GradeId == null)
+        {
+            await GradesApp.CreateAsync(new CreateUpdateGradeDto
+            {
+                EnrollmentId = row.EnrollmentId,
+                GradeValue = row.Value,
+                Note = row.Note
+            });
+        }
+        else
+        {
+            await GradesApp.UpdateAsync(row.GradeId.Value, new CreateUpdateGradeDto
+            {
+                EnrollmentId = row.EnrollmentId,
+                GradeValue = row.Value,
+                Note = row.Note
+            });
+        }
+
+        await LoadEnrollmentsAsync();
+    }
+
+    private async Task DeleteGrade(GradeRow row)
+    {
+        if (row.GradeId != null)
+            await GradesApp.DeleteAsync(row.GradeId.Value);
+
+        await LoadEnrollmentsAsync();
+    }
+
+    private class GradeRow
+    {
+        public Guid EnrollmentId { get; set; }
+        public Guid? GradeId { get; set; }
+        public string StudentName { get; set; } = "";
+        public int Value { get; set; }
+        public string? Note { get; set; }
+    }
+}

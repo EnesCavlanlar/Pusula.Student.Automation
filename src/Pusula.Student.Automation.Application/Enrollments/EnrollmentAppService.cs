@@ -4,7 +4,7 @@ using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Domain.Repositories;
 
-// alias: entity ile namespace çakışmasını önle
+// Entity alias: isim/namespace çakışmasını önler
 using EnrollmentEntity = Pusula.Student.Automation.Enrollments.Enrollment;
 
 using Pusula.Student.Automation.Enrollments;
@@ -14,11 +14,12 @@ namespace Pusula.Student.Automation.Enrollments
 {
     public class EnrollmentAppService :
         CrudAppService<
-            EnrollmentEntity,              // Entity
-            EnrollmentDto,                 // Return DTO
-            Guid,                          // PK
-            PagedAndSortedResultRequestDto,
-            CreateEnrollmentDto>           // Create DTO
+            EnrollmentEntity,               // Entity
+            EnrollmentDto,                  // Return DTO
+            Guid,                           // PK
+            PagedAndSortedResultRequestDto, // Paging input
+            CreateEnrollmentDto>,           // Create DTO
+        IEnrollmentAppService               // <-- arayüz eklendi
     {
         public EnrollmentAppService(IRepository<EnrollmentEntity, Guid> repository)
             : base(repository)
@@ -26,13 +27,13 @@ namespace Pusula.Student.Automation.Enrollments
             GetPolicyName = AutomationPermissions.Enrollments.Default;
             GetListPolicyName = AutomationPermissions.Enrollments.Default;
             CreatePolicyName = AutomationPermissions.Enrollments.Create;
-            UpdatePolicyName = AutomationPermissions.Enrollments.Edit;   // şu an kullanılmıyor ama dursun
+            UpdatePolicyName = AutomationPermissions.Enrollments.Edit;   // şu an kullanılmayabilir
             DeletePolicyName = AutomationPermissions.Enrollments.Delete;
         }
 
         public override async Task<EnrollmentDto> CreateAsync(CreateEnrollmentDto input)
         {
-            // EnrollmentDate boşsa UtcNow ver
+            // Tarih boş gelirse Clock.Now (UTC) verelim
             var entity = new EnrollmentEntity(
                 GuidGenerator.Create(),
                 input.StudentId,

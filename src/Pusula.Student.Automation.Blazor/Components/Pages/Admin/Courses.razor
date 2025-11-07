@@ -1,0 +1,149 @@
+﻿@page "/admin/courses"
+@using Pusula.Student.Automation.Courses
+@using Pusula.Student.Automation.Teachers
+@using Volo.Abp.Application.Dtos
+@inject ICourseAppService CoursesApp
+@inject ITeacherAppService TeachersApp
+
+<h3>Courses</h3>
+
+<div class="mb-3">
+    <button class="btn btn-primary" @onclick="ShowCreate">+ New Course</button>
+</div>
+
+@if (_loading)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Code</th>
+                <th>Name</th>
+                <th>Credit</th>
+                <th>Teacher</th>
+                <th style="width:160px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var c in _items)
+            {
+                <tr>
+                    <td>@c.Code</td>
+                    <td>@c.Name</td>
+                    <td>@c.Credit</td>
+                    <td>@(_teacherMap.TryGetValue(c.TeacherId, out var t) ? $"{t.FirstName} {t.LastName}" : c.TeacherId.ToString())</td>
+                    <td>
+                        <button class="btn btn-sm btn-secondary me-2" @onclick="() => Edit(c)">Edit</button>
+                        <button class="btn btn-sm btn-danger" @onclick="() => Delete(c.Id)">Delete</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@if (_showModal)
+{
+    <div class="modal fade show d-block" style="background:rgba(0,0,0,.5);" @onclick="CloseModal">
+        <div class="modal-dialog" @onclick:stopPropagation>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(_editId == null ? "Create Course" : "Edit Course")</h5>
+                    <button type="button" class="btn-close" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label">Name</label>
+                        <input class="form-control" @bind="_form.Name" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Code</label>
+                        <input class="form-control" @bind="_form.Code" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Credit</label>
+                        <input class="form-control" type="number" @bind="_form.Credit" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Teacher</label>
+                        <select class="form-select" @bind="_form.TeacherId">
+                            <option value="@Guid.Empty">-- select teacher --</option>
+                            @foreach (var t in _teachers)
+                            {
+                                <option value="@t.Id">@t.FirstName @t.LastName (@t.Email)</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseModal">Cancel</button>
+                    <button class="btn btn-primary" @onclick="Save">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private List<CourseDto> _items = new();
+    private List<TeacherDto> _teachers = new();
+    private Dictionary<Guid, TeacherDto> _teacherMap = new();
+    private bool _showModal = false;
+    private Guid? _editId = null;
+    private CreateUpdateCourseDto _form = new();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+
+        // teachers
+        var tl = await TeachersApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
+        _teachers = tl.Items.ToList();
+        _teacherMap = _teachers.ToDictionary(t => t.Id, t => t);
+
+        // courses
+        var cl = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
+        _items = cl.Items.ToList();
+
+        _loading = false;
+    }
+
+    private void ShowCreate()
+    {
+        _editId = null;
+        _form = new();
+        _showModal = true;
+    }
+
+    private void Edit(CourseDto c)
+    {
+        _editId = c.Id;
+        _form = new CreateUpdateCourseDto { Name = c.Name, Code = c.Code, Credit = c.Credit, TeacherId = c.TeacherId };
+        _showModal = true;
+    }
+
+    private async Task Save()
+    {
+        if (_form.TeacherId == Guid.Empty) return; // basit guard
+
+        if (_editId == null) await CoursesApp.CreateAsync(_form);
+        else await CoursesApp.UpdateAsync(_editId.Value, _form);
+
+        _showModal = false;
+        await LoadAsync();
+    }
+
+    private async Task Delete(Guid id)
+    {
+        await CoursesApp.DeleteAsync(id);
+        await LoadAsync();
+    }
+
+    private void CloseModal() => _showModal = false;
+}

@@ -2,22 +2,21 @@
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Domain.Repositories;
-
-// Alias: entity ile namespace çakışmasını önle
-using CourseEntity = Pusula.Student.Automation.Courses.Course;
-
-using Pusula.Student.Automation.Courses;
 using Pusula.Student.Automation.Permissions;
+
+// 🔴 ALIAS: Entity ismi ile namespace çakışmasını önler
+using CourseEntity = Pusula.Student.Automation.Courses.Course;
 
 namespace Pusula.Student.Automation.Courses
 {
     public class CourseAppService :
         CrudAppService<
-            CourseEntity,                 // Entity
-            CourseDto,                    // DTO (return)
-            Guid,                         // PK
+            CourseEntity,                 // Entity (alias)
+            CourseDto,                    // DTO
+            Guid,
             PagedAndSortedResultRequestDto,
-            CreateUpdateCourseDto>        // Create/Update DTO
+            CreateUpdateCourseDto>,
+        ICourseAppService
     {
         public CourseAppService(IRepository<CourseEntity, Guid> repository)
             : base(repository)

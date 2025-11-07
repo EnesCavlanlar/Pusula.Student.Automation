@@ -1,7 +1,6 @@
 ﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using Pusula.Student.Automation.Identity;
-using System;
 using System.Threading.Tasks;
 using Volo.Abp.Data;
 using Volo.Abp.DependencyInjection;
@@ -12,7 +11,9 @@ using Volo.Abp.Uow;
 
 namespace Pusula.Student.Automation.Data
 {
-    // ABP, IDataSeedContributor implement eden sınıfları otomatik bulur ve DbMigrator çalışınca tetikler.
+    /// <summary>
+    /// DbMigrator çalıştığında: roller + admin kullanıcı (İZİN YOK – izinler Application katmanında verilecek).
+    /// </summary>
     public class StudentAutomationDataSeedContributor :
         IDataSeedContributor, ITransientDependency
     {
@@ -46,25 +47,22 @@ namespace Pusula.Student.Automation.Data
                 await EnsureRoleAsync(StudentAutomationRoleNames.Teacher);
                 await EnsureRoleAsync(StudentAutomationRoleNames.Student);
 
-                // 2) Admin kullanıcıyı oluştur ve role ata
-                var adminEmail = "admin@student.local";
-                var adminUser = await _userManager.FindByEmailAsync(adminEmail);
+                // 2) Admin kullanıcıyı oluştur ve admin rolüne ekle
+                const string adminEmail = "admin@student.local";
+                const string adminUserName = "admin";
+                const string adminPassword = "Admin123*"; // DEV için
 
+                var adminUser = await _userManager.FindByEmailAsync(adminEmail);
                 if (adminUser == null)
                 {
-                    var id = _guid.Create();
-                    adminUser = new IdentityUser(id, adminEmail, adminEmail);
-                    var createResult = await _userManager.CreateAsync(adminUser, "Admin123*");
-                    createResult.CheckErrors();
-
+                    adminUser = new IdentityUser(_guid.Create(), adminUserName, adminEmail);
+                    (await _userManager.CreateAsync(adminUser, adminPassword)).CheckErrors();
                     _logger.LogInformation("Created admin user {Email}", adminEmail);
                 }
 
-                // Admin rolünü ver (varsa tekrar vermeye çalışmak sorun olmaz)
                 if (!await _userManager.IsInRoleAsync(adminUser, StudentAutomationRoleNames.Admin))
                 {
-                    var roleResult = await _userManager.AddToRoleAsync(adminUser, StudentAutomationRoleNames.Admin);
-                    roleResult.CheckErrors();
+                    (await _userManager.AddToRoleAsync(adminUser, StudentAutomationRoleNames.Admin)).CheckErrors();
                 }
             }
         }
@@ -74,8 +72,7 @@ namespace Pusula.Student.Automation.Data
             var role = await _roleManager.FindByNameAsync(roleName);
             if (role == null)
             {
-                var create = await _roleManager.CreateAsync(new IdentityRole(_guid.Create(), roleName));
-                create.CheckErrors();
+                (await _roleManager.CreateAsync(new IdentityRole(_guid.Create(), roleName))).CheckErrors();
                 _logger.LogInformation("Created role {Role}", roleName);
             }
         }

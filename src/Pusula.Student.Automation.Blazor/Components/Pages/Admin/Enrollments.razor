@@ -1,0 +1,130 @@
+﻿@page "/admin/enrollments"
+@using Volo.Abp.Application.Dtos
+@using Pusula.Student.Automation.Enrollments
+@using Pusula.Student.Automation.Students
+@using Pusula.Student.Automation.Courses
+@inject IEnrollmentAppService EnrollmentsApp
+@inject IStudentAppService StudentsApp
+@inject ICourseAppService CoursesApp
+
+<h3>Enrollments</h3>
+
+<div class="card p-3 mb-3">
+    <div class="row g-2 align-items-end">
+        <div class="col-md-4">
+            <label class="form-label">Student</label>
+            <select class="form-select" @bind="_create.StudentId">
+                <option value="@Guid.Empty">-- select student --</option>
+                @foreach (var s in _students)
+                {
+                    <option value="@s.Id">@s.StudentNo - @s.FirstName @s.LastName</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Course</label>
+            <select class="form-select" @bind="_create.CourseId">
+                <option value="@Guid.Empty">-- select course --</option>
+                @foreach (var c in _courses)
+                {
+                    <option value="@c.Id">@c.Code - @c.Name</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Date</label>
+            <InputDate @bind-Value="_createDate" class="form-control" />
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-primary w-100" @onclick="Create">Add</button>
+        </div>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Student</th>
+                <th>Course</th>
+                <th>Date</th>
+                <th style="width:100px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var e in _items)
+            {
+                <tr>
+                    <td>@ViewStudent(e.StudentId)</td>
+                    <td>@ViewCourse(e.CourseId)</td>
+                    <td>@e.EnrollmentDate.ToString("yyyy-MM-dd")</td>
+                    <td>
+                        <button class="btn btn-sm btn-danger" @onclick="() => Delete(e.Id)">Delete</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool _loading = true;
+    private List<EnrollmentDto> _items = new();
+    private List<StudentDto> _students = new();
+    private List<CourseDto> _courses = new();
+
+    private CreateEnrollmentDto _create = new();
+    private DateTime? _createDate = DateTime.UtcNow.Date;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+
+        var sl = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
+        _students = sl.Items.ToList();
+
+        var cl = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
+        _courses = cl.Items.ToList();
+
+        var el = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
+        _items = el.Items.ToList();
+
+        _loading = false;
+    }
+
+    private async Task Create()
+    {
+        if (_create.StudentId == Guid.Empty || _create.CourseId == Guid.Empty) return;
+        _create.EnrollmentDate = _createDate ?? DateTime.UtcNow;
+
+        await EnrollmentsApp.CreateAsync(_create);
+        _create = new();
+        _createDate = DateTime.UtcNow.Date;
+        await LoadAsync();
+    }
+
+    private async Task Delete(Guid id)
+    {
+        await EnrollmentsApp.DeleteAsync(id);
+        await LoadAsync();
+    }
+
+    private string ViewStudent(Guid id)
+    {
+        var s = _students.FirstOrDefault(x => x.Id == id);
+        return s is null ? id.ToString() : $"{s.StudentNo} - {s.FirstName} {s.LastName}";
+    }
+
+    private string ViewCourse(Guid id)
+    {
+        var c = _courses.FirstOrDefault(x => x.Id == id);
+        return c is null ? id.ToString() : $"{c.Code} - {c.Name}";
+    }
+}

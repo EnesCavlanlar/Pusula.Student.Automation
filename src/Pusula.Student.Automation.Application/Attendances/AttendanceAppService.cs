@@ -18,7 +18,8 @@ namespace Pusula.Student.Automation.Attendances
             AttendanceDto,
             Guid,
             PagedAndSortedResultRequestDto,
-            CreateUpdateAttendanceDto>
+            CreateUpdateAttendanceDto>,
+             IAttendanceAppService
     {
         public AttendanceAppService(IRepository<AttendanceEntity, Guid> repository)
             : base(repository)

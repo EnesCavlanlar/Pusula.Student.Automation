@@ -36,7 +36,7 @@ public class AutomationMenuContributor : IMenuContributor
             )
         );
 
-        // Students (Admin menüsüne gerek kalmadan ana menüye ekliyoruz)
+        // Students
         context.Menu.AddItem(
             new ApplicationMenuItem(
                 "Automation.Students",
@@ -48,9 +48,69 @@ public class AutomationMenuContributor : IMenuContributor
             )
         );
 
+        // Teachers
+        context.Menu.AddItem(
+            new ApplicationMenuItem(
+                "Automation.Teachers",
+                l["Menu:Teachers"],
+                url: "/admin/teachers",
+                icon: "fa fa-chalkboard-teacher",
+                order: 3,
+                requiredPermissionName: AutomationPermissions.Teachers.Default
+            )
+        );
+
+        // Courses
+        context.Menu.AddItem(
+            new ApplicationMenuItem(
+                "Automation.Courses",
+                l["Menu:Courses"],
+                url: "/admin/courses",
+                icon: "fa fa-book",
+                order: 4,
+                requiredPermissionName: AutomationPermissions.Courses.Default
+            )
+        );
+
+        // Enrollments
+        context.Menu.AddItem(
+            new ApplicationMenuItem(
+                "Automation.Enrollments",
+                l["Menu:Enrollments"],
+                url: "/admin/enrollments",
+                icon: "fa fa-link",
+                order: 5,
+                requiredPermissionName: AutomationPermissions.Enrollments.Default
+            )
+        );
+
+        // Grades
+        context.Menu.AddItem(
+            new ApplicationMenuItem(
+                "Automation.Grades",
+                l["Menu:Grades"],
+                url: "/admin/grades",
+                icon: "fa fa-percent",
+                order: 6,
+                requiredPermissionName: AutomationPermissions.Grades.Default
+            )
+        );
+
+        // Attendance
+        context.Menu.AddItem(
+            new ApplicationMenuItem(
+                "Automation.Attendance",
+                l["Menu:Attendance"],
+                url: "/admin/attendance",
+                icon: "fa fa-calendar-check",
+                order: 7,
+                requiredPermissionName: AutomationPermissions.Attendances.Default
+            )
+        );
+
         // Administration
         var administration = context.Menu.GetAdministration();
-        administration.Order = 6;
+        administration.Order = 8;
 
         if (MultiTenancyConsts.IsEnabled)
         {

@@ -17,7 +17,8 @@ namespace Pusula.Student.Automation.Grades
             GradeDto,
             Guid,
             PagedAndSortedResultRequestDto,
-            CreateUpdateGradeDto>
+            CreateUpdateGradeDto>,
+            IGradeAppService
     {
         public GradeAppService(IRepository<GradeEntity, Guid> repository)
             : base(repository)

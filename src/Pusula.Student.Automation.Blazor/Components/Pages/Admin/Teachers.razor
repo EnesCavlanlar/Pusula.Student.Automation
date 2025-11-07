@@ -1,13 +1,12 @@
-﻿@page "/admin/students"
-@inject IStudentAppService StudentsApp
-@using Pusula.Student.Automation.Students
+﻿@page "/admin/teachers"
+@using Pusula.Student.Automation.Teachers
 @using Volo.Abp.Application.Dtos
-@using Microsoft.AspNetCore.Components.Forms
+@inject ITeacherAppService TeachersApp
 
-<h3>Students</h3>
+<h3>Teachers</h3>
 
 <div class="mb-3">
-    <button class="btn btn-primary" @onclick="ShowCreate">+ New Student</button>
+    <button class="btn btn-primary" @onclick="ShowCreate">+ New Teacher</button>
 </div>
 
 @if (_loading)
@@ -19,24 +18,22 @@ else
     <table class="table table-striped">
         <thead>
             <tr>
-                <th>Student No</th>
                 <th>Name</th>
                 <th>Email</th>
-                <th>BirthDate</th>
+                <th>Department</th>
                 <th style="width:140px;"></th>
             </tr>
         </thead>
         <tbody>
-            @foreach (var s in _items)
+            @foreach (var t in _items)
             {
                 <tr>
-                    <td>@s.StudentNo</td>
-                    <td>@s.FirstName @s.LastName</td>
-                    <td>@s.Email</td>
-                    <td>@(s.BirthDate?.ToString("yyyy-MM-dd"))</td>
+                    <td>@t.FirstName @t.LastName</td>
+                    <td>@t.Email</td>
+                    <td>@t.Department</td>
                     <td>
-                        <button class="btn btn-sm btn-secondary me-2" @onclick="() => Edit(s)">Edit</button>
-                        <button class="btn btn-sm btn-danger" @onclick="() => Delete(s.Id)">Delete</button>
+                        <button class="btn btn-sm btn-secondary me-2" @onclick="() => Edit(t)">Edit</button>
+                        <button class="btn btn-sm btn-danger" @onclick="() => Delete(t.Id)">Delete</button>
                     </td>
                 </tr>
             }
@@ -50,14 +47,10 @@ else
         <div class="modal-dialog" @onclick:stopPropagation>
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">@(_editId == null ? "Create Student" : "Edit Student")</h5>
+                    <h5 class="modal-title">@(_editId == null ? "Create Teacher" : "Edit Teacher")</h5>
                     <button type="button" class="btn-close" @onclick="CloseModal"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="mb-2">
-                        <label class="form-label">Student No</label>
-                        <input class="form-control" @bind="_form.StudentNo" />
-                    </div>
                     <div class="mb-2">
                         <label class="form-label">First Name</label>
                         <input class="form-control" @bind="_form.FirstName" />
@@ -71,9 +64,8 @@ else
                         <input class="form-control" @bind="_form.Email" />
                     </div>
                     <div class="mb-2">
-                        <label class="form-label">Birth Date</label>
-                        <!-- STRING yerine DateTime? ile InputDate kullan -->
-                        <InputDate @bind-Value="_birth" class="form-control" />
+                        <label class="form-label">Department</label>
+                        <input class="form-control" @bind="_form.Department" />
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -87,59 +79,39 @@ else
 
 @code {
     private bool _loading = true;
-    private List<StudentDto> _items = new();
+    private List<TeacherDto> _items = new();
     private bool _showModal = false;
     private Guid? _editId = null;
-    private CreateUpdateStudentDto _form = new();
+    private CreateUpdateTeacherDto _form = new();
 
-    // Date picker için DateTime?
-    private DateTime? _birth;
-
-    protected override async Task OnInitializedAsync()
-    {
-        await LoadAsync();
-    }
+    protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task LoadAsync()
     {
         _loading = true;
-        var list = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
+        var list = await TeachersApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
         _items = list.Items.ToList();
         _loading = false;
-        StateHasChanged();
     }
 
     private void ShowCreate()
     {
         _editId = null;
         _form = new();
-        _birth = null;
         _showModal = true;
     }
 
-    private void Edit(StudentDto s)
+    private void Edit(TeacherDto t)
     {
-        _editId = s.Id;
-        _form = new CreateUpdateStudentDto
-        {
-            StudentNo = s.StudentNo,
-            FirstName = s.FirstName,
-            LastName = s.LastName,
-            Email = s.Email,
-            BirthDate = s.BirthDate
-        };
-        _birth = s.BirthDate?.Date;
+        _editId = t.Id;
+        _form = new CreateUpdateTeacherDto { FirstName = t.FirstName, LastName = t.LastName, Email = t.Email, Department = t.Department };
         _showModal = true;
     }
 
     private async Task Save()
     {
-        _form.BirthDate = _birth; // doğrudan ata
-
-        if (_editId == null)
-            await StudentsApp.CreateAsync(_form);
-        else
-            await StudentsApp.UpdateAsync(_editId.Value, _form);
+        if (_editId == null) await TeachersApp.CreateAsync(_form);
+        else await TeachersApp.UpdateAsync(_editId.Value, _form);
 
         _showModal = false;
         await LoadAsync();
@@ -147,7 +119,7 @@ else
 
     private async Task Delete(Guid id)
     {
-        await StudentsApp.DeleteAsync(id);
+        await TeachersApp.DeleteAsync(id);
         await LoadAsync();
     }
 
