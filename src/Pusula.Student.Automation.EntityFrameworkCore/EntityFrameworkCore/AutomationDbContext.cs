@@ -41,8 +41,8 @@ public class AutomationDbContext :
     public DbSet<TeacherEntity> Teachers { get; set; }
     public DbSet<CourseEntity> Courses { get; set; }
     public DbSet<EnrollmentEntity> Enrollments { get; set; }
-    public DbSet<GradeEntity> Grades { get; set; }      // <-- eklendi
-    public DbSet<AttendanceEntity> Attendances { get; set; }      // <-- eklendi
+    public DbSet<GradeEntity> Grades { get; set; }
+    public DbSet<AttendanceEntity> Attendances { get; set; }
 
     #region Entities from the modules
 
@@ -123,8 +123,7 @@ public class AutomationDbContext :
             b.Property(x => x.Code).IsRequired().HasMaxLength(32);
             b.Property(x => x.Credit);
 
-            // Unique Code per tenant
-            // Unique Code (single-tenant / no TenantId)
+            // Unique Code
             b.HasIndex(x => x.Code).IsUnique();
 
             // Relation: Course -> Teacher (required)
@@ -143,7 +142,9 @@ public class AutomationDbContext :
             b.Property(x => x.EnrollmentDate).IsRequired();
 
             // Ayný öðrencinin ayný dersi bir kez almasý için unique index
-            b.HasIndex(nameof(EnrollmentEntity.TenantId), nameof(EnrollmentEntity.StudentId), nameof(EnrollmentEntity.CourseId))
+            b.HasIndex(nameof(EnrollmentEntity.TenantId),
+                       nameof(EnrollmentEntity.StudentId),
+                       nameof(EnrollmentEntity.CourseId))
              .IsUnique();
 
             // FK: Enrollment -> Student
@@ -165,7 +166,8 @@ public class AutomationDbContext :
             b.ToTable(AutomationConsts.DbTablePrefix + "Grades", AutomationConsts.DbSchema);
             b.ConfigureByConvention();
 
-            b.Property(x => x.GradeValue).IsRequired();      // 0-100
+            // Entity alan adý: GradeValue
+            b.Property(x => x.GradeValue).IsRequired(); // 0-100
             b.Property(x => x.Note).HasMaxLength(512);
 
             // FK: Grade -> Enrollment
@@ -174,9 +176,10 @@ public class AutomationDbContext :
              .HasForeignKey(x => x.EnrollmentId)
              .OnDelete(DeleteBehavior.Cascade);
 
-            // (Opsiyonel) ayný enrollment için sadece tek grade istiyorsan:
+            // Ýstersen tek not kýsýtý:
             // b.HasIndex(nameof(GradeEntity.TenantId), nameof(GradeEntity.EnrollmentId)).IsUnique();
         });
+
 
         // ---- Attendance ----
         builder.Entity<AttendanceEntity>(b =>
@@ -188,7 +191,9 @@ public class AutomationDbContext :
             b.Property(x => x.IsPresent).IsRequired();
 
             // Ayný Enrollment + Date için tek kayýt
-            b.HasIndex(nameof(AttendanceEntity.TenantId), nameof(AttendanceEntity.EnrollmentId), nameof(AttendanceEntity.Date))
+            b.HasIndex(nameof(AttendanceEntity.TenantId),
+                       nameof(AttendanceEntity.EnrollmentId),
+                       nameof(AttendanceEntity.Date))
              .IsUnique();
 
             // FK: Attendance -> Enrollment

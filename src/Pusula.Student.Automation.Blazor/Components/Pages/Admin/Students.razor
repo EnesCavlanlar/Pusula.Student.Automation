@@ -1,12 +1,21 @@
 ﻿@page "/admin/students"
-@inject IStudentAppService StudentsApp
+@using Pusula.Student.Automation.Permissions
+@attribute [Authorize(AutomationPermissions.Students.Default)]
+
+@using Microsoft.AspNetCore.Authorization
+@using Volo.Abp.Authorization                   @* IsGrantedAsync extension *@
 @using Pusula.Student.Automation.Students
 @using Volo.Abp.Application.Dtos
+@inject IStudentAppService StudentsApp
+@inject IAuthorizationService AuthorizationService
 
 <h3>Students</h3>
 
 <div class="mb-3">
-    <button class="btn btn-primary" @onclick="ShowCreate">+ New Student</button>
+    @if (_canCreate)
+    {
+        <button class="btn btn-primary" @onclick="ShowCreate">+ New Student</button>
+    }
 </div>
 
 @if (_loading)
@@ -22,7 +31,7 @@ else
                 <th>Name</th>
                 <th>Email</th>
                 <th>BirthDate</th>
-                <th style="width:140px;"></th>
+                <th style="width:160px;"></th>
             </tr>
         </thead>
         <tbody>
@@ -34,8 +43,14 @@ else
                     <td>@s.Email</td>
                     <td>@(s.BirthDate?.ToString("yyyy-MM-dd"))</td>
                     <td>
-                        <button class="btn btn-sm btn-secondary me-2" @onclick="() => Edit(s)">Edit</button>
-                        <button class="btn btn-sm btn-danger" @onclick="() => Delete(s.Id)">Delete</button>
+                        @if (_canEdit)
+                        {
+                            <button class="btn btn-sm btn-secondary me-2" @onclick="() => Edit(s)">Edit</button>
+                        }
+                        @if (_canDelete)
+                        {
+                            <button class="btn btn-sm btn-danger" @onclick="() => Delete(s.Id)">Delete</button>
+                        }
                     </td>
                 </tr>
             }
@@ -76,7 +91,11 @@ else
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" @onclick="CloseModal">Cancel</button>
-                    <button class="btn btn-primary" @onclick="Save">Save</button>
+                    @* Save: create için Create izni, edit için Edit izni gerekir *@
+                    @if ((_editId == null && _canCreate) || (_editId != null && _canEdit))
+                    {
+                        <button class="btn btn-primary" @onclick="Save">Save</button>
+                    }
                 </div>
             </div>
         </div>
@@ -90,7 +109,21 @@ else
     private Guid? _editId;
     private CreateUpdateStudentDto _form = new();
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    // permission flags
+    private bool _canCreate, _canEdit, _canDelete;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CheckPermissionsAsync();
+        await LoadAsync();
+    }
+
+    private async Task CheckPermissionsAsync()
+    {
+        _canCreate = await AuthorizationService.IsGrantedAsync(AutomationPermissions.Students.Create);
+        _canEdit = await AuthorizationService.IsGrantedAsync(AutomationPermissions.Students.Edit);
+        _canDelete = await AuthorizationService.IsGrantedAsync(AutomationPermissions.Students.Delete);
+    }
 
     private async Task LoadAsync()
     {
@@ -98,6 +131,7 @@ else
         var list = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
         _items = list.Items.ToList();
         _loading = false;
+        StateHasChanged();
     }
 
     private void ShowCreate()

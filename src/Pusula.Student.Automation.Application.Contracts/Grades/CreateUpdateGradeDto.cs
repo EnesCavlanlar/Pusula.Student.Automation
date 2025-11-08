@@ -1,17 +1,15 @@
 ﻿using System;
-using System.ComponentModel.DataAnnotations;
+using Volo.Abp.Application.Dtos;
 
 namespace Pusula.Student.Automation.Grades
 {
-    public class CreateUpdateGradeDto
+    public class CreateUpdateGradeDto : IEntityDto
     {
-        [Required]
         public Guid EnrollmentId { get; set; }
 
-        [Range(0, 100)]
-        public int GradeValue { get; set; }
+        // UI ile uyumlu isim
+        public int Score { get; set; }          // 0–100
 
-        [StringLength(512)]
         public string? Note { get; set; }
     }
 }

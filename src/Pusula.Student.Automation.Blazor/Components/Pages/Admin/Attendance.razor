@@ -1,4 +1,9 @@
 ﻿@page "/admin/attendance"
+@using Pusula.Student.Automation.Permissions
+@attribute [Authorize(AutomationPermissions.Attendances.Default)]
+
+@using Microsoft.AspNetCore.Authorization
+@using Volo.Abp.Authorization                 @* IsGrantedAsync extension *@
 @using Pusula.Student.Automation.Courses
 @using Pusula.Student.Automation.Enrollments
 @using Pusula.Student.Automation.Students
@@ -6,6 +11,7 @@
 @inject ICourseAppService CoursesApp
 @inject IEnrollmentAppService EnrollmentsApp
 @inject IStudentAppService StudentsApp
+@inject IAuthorizationService AuthorizationService
 
 <h3 class="mb-3">Attendance</h3>
 
@@ -13,7 +19,7 @@
     <div class="col-md-6">
         <label class="form-label">Course</label>
         <InputSelect class="form-select" @bind-Value="_selectedCourseId" @onchange="OnCourseChanged">
-            <option value="@Guid.Empty">— Select a course —</option> @* FIX *@
+            <option value="@Guid.Empty">— Select a course —</option>
             @foreach (var c in _courses)
             {
                 <option value="@c.Id">@c.Code - @c.Name</option>
@@ -25,7 +31,11 @@
         <InputDate class="form-control" @bind-Value="_date" />
     </div>
     <div class="col-md-3 d-flex align-items-end">
-        <button class="btn btn-outline-primary w-100" @onclick="LoadGridAsync" disabled="@(_selectedCourseId == Guid.Empty)">Load</button>
+        <button class="btn btn-outline-primary w-100"
+                @onclick="LoadGridAsync"
+                disabled="@(_selectedCourseId == Guid.Empty)">
+            Load
+        </button>
     </div>
 </div>
 
@@ -49,9 +59,13 @@ else if (_rows.Count == 0)
 else
 {
     <div class="d-flex gap-2 mb-2">
-        <button class="btn btn-sm btn-success" @onclick="CheckAll">Mark all present</button>
-        <button class="btn btn-sm btn-secondary" @onclick="UncheckAll">Clear all</button>
-        <button class="btn btn-sm btn-primary ms-auto" disabled title="Backend wiring pending">Save</button>
+        @if (_canEdit)
+        {
+            <button class="btn btn-sm btn-success" @onclick="CheckAll">Mark all present</button>
+            <button class="btn btn-sm btn-secondary" @onclick="UncheckAll">Clear all</button>
+            <button class="btn btn-sm btn-primary ms-auto" disabled title="Backend wiring pending">Save</button>
+            @* ileride: @onclick="SaveAsync" *@
+        }
     </div>
 
     <table class="table table-striped align-middle">
@@ -67,7 +81,7 @@ else
                 <tr>
                     <td>@StudentLabel(r.StudentId)</td>
                     <td>
-                        <input class="form-check-input" type="checkbox" @bind="r.Present" />
+                        <input class="form-check-input" type="checkbox" @bind="r.Present" disabled="@(!_canEdit)" />
                     </td>
                 </tr>
             }
@@ -76,21 +90,31 @@ else
 }
 
 @code {
+    // permissions
+    private bool _canCreate, _canEdit, _canDelete;
+
     private List<CourseDto> _courses = new();
-    private Guid _selectedCourseId = Guid.Empty;        // FIX: default Empty
+    private Guid _selectedCourseId = Guid.Empty;
 
     private DateTime _date = DateTime.Today;
     private bool _loading;
     private string _error = string.Empty;
 
     private List<RowVm> _rows = new();
-
     private List<StudentDto> _students = new();
 
     protected override async Task OnInitializedAsync()
     {
+        await CheckPermissionsAsync();
         await LoadCoursesAsync();
         await LoadStudentsAsync();
+    }
+
+    private async Task CheckPermissionsAsync()
+    {
+        _canCreate = await AuthorizationService.IsGrantedAsync(AutomationPermissions.Attendances.Create);
+        _canEdit = await AuthorizationService.IsGrantedAsync(AutomationPermissions.Attendances.Edit);
+        _canDelete = await AuthorizationService.IsGrantedAsync(AutomationPermissions.Attendances.Delete);
     }
 
     private async Task LoadCoursesAsync()
@@ -168,6 +192,16 @@ else
 
     private void CheckAll() => _rows.ForEach(r => r.Present = true);
     private void UncheckAll() => _rows.ForEach(r => r.Present = false);
+
+    // private async Task SaveAsync()
+    // {
+    //     if (!_canEdit) return;
+    //     await AttendanceApp.UpsertAsync(new UpsertAttendanceDto {
+    //         CourseId = _selectedCourseId,
+    //         Date = _date,
+    //         Items = _rows.Select(x => new AttendanceItemDto { EnrollmentId = x.EnrollmentId, Present = x.Present }).ToList()
+    //     });
+    // }
 
     private class RowVm
     {

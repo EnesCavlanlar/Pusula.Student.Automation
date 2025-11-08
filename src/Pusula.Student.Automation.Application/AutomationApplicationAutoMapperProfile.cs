@@ -22,24 +22,28 @@ namespace Pusula.Student.Automation
     {
         public AutomationApplicationAutoMapperProfile()
         {
-            // Student
+            // Students
             CreateMap<StudentEntity, StudentDto>();
             CreateMap<CreateUpdateStudentDto, StudentEntity>();
 
-            // Teacher
+            // Teachers
             CreateMap<TeacherEntity, TeacherDto>();
             CreateMap<CreateUpdateTeacherDto, TeacherEntity>();
 
-            // Course
+            // Courses
             CreateMap<CourseEntity, CourseDto>();
             CreateMap<CreateUpdateCourseDto, CourseEntity>();
 
-            // Enrollment
-            CreateMap(typeof(EnrollmentEntity), typeof(EnrollmentDto));
+            // Enrollments
+            CreateMap<EnrollmentEntity, EnrollmentDto>();
+            CreateMap<CreateEnrollmentDto, EnrollmentEntity>();
 
-            // Grade
-            CreateMap<GradeEntity, GradeDto>();
-            CreateMap<CreateUpdateGradeDto, GradeEntity>();
+            // Grades  (Entity.GradeValue  <-> DTO.Score)
+            CreateMap<GradeEntity, GradeDto>()
+                .ForMember(d => d.Score, opt => opt.MapFrom(s => s.GradeValue));
+
+            CreateMap<CreateUpdateGradeDto, GradeEntity>()
+                .ForMember(d => d.GradeValue, opt => opt.MapFrom(s => s.Score));
 
             // Attendance
             CreateMap<AttendanceEntity, AttendanceDto>();
@@ -47,4 +51,3 @@ namespace Pusula.Student.Automation
         }
     }
 }
- 

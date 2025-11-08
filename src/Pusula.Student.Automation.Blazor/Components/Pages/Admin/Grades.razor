@@ -1,4 +1,9 @@
 ﻿@page "/admin/grades"
+@using Pusula.Student.Automation.Permissions
+@attribute [Authorize(AutomationPermissions.Grades.Default)]
+
+@using Microsoft.AspNetCore.Authorization
+@using Volo.Abp.Authorization                   @* IsGrantedAsync extension *@
 @using Pusula.Student.Automation.Courses
 @using Pusula.Student.Automation.Enrollments
 @using Pusula.Student.Automation.Students
@@ -6,6 +11,7 @@
 @inject ICourseAppService CoursesApp
 @inject IEnrollmentAppService EnrollmentsApp
 @inject IStudentAppService StudentsApp
+@inject IAuthorizationService AuthorizationService
 
 <h3 class="mb-3">Grades</h3>
 
@@ -13,7 +19,7 @@
     <div class="col-md-6">
         <label class="form-label">Course</label>
         <InputSelect class="form-select" @bind-Value="_selectedCourseId" @onchange="OnCourseChanged">
-            <option value="@Guid.Empty">— Select a course —</option> @* FIX *@
+            <option value="@Guid.Empty">— Select a course —</option>
             @foreach (var c in _courses)
             {
                 <option value="@c.Id">@c.Code - @c.Name</option>
@@ -46,7 +52,7 @@ else
             <tr>
                 <th style="width: 360px;">Student</th>
                 <th style="width: 140px;">Grade (0–100)</th>
-                <th style="width: 140px;">Actions</th>
+                <th style="width: 180px;">Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -55,11 +61,15 @@ else
                 <tr>
                     <td>@StudentLabel(r.StudentId)</td>
                     <td style="max-width:140px;">
-                        <InputNumber class="form-control" @bind-Value="r.Score" />
+                        <InputNumber class="form-control" @bind-Value="r.Score" disabled="@(!_canEdit)" />
                     </td>
-                    <td>
-                        <button class="btn btn-sm btn-secondary" @onclick="() => ResetRow(r)">Reset</button>
-                        <button class="btn btn-sm btn-primary ms-2" disabled title="Backend wiring pending">Save</button>
+                    <td class="text-nowrap">
+                        @if (_canEdit)
+                        {
+                            <button class="btn btn-sm btn-secondary" @onclick="() => ResetRow(r)">Reset</button>
+                            <button class="btn btn-sm btn-primary ms-2" disabled title="Backend wiring pending">Save</button>
+                            @* ileride: @onclick="() => SaveRowAsync(r)" *@
+                        }
                     </td>
                 </tr>
             }
@@ -68,20 +78,31 @@ else
 }
 
 @code {
+    // permissions
+    private bool _canCreate, _canEdit, _canDelete;
+
+    // data
     private List<CourseDto> _courses = new();
-    private Guid _selectedCourseId = Guid.Empty;        // FIX: default Empty
+    private Guid _selectedCourseId = Guid.Empty;
 
     private bool _loading;
     private string _error = string.Empty;
 
     private List<GradeRowVm> _rows = new();
-
     private List<StudentDto> _students = new();
 
     protected override async Task OnInitializedAsync()
     {
+        await CheckPermissionsAsync();
         await LoadCoursesAsync();
         await LoadStudentsAsync();
+    }
+
+    private async Task CheckPermissionsAsync()
+    {
+        _canCreate = await AuthorizationService.IsGrantedAsync(AutomationPermissions.Grades.Create);
+        _canEdit = await AuthorizationService.IsGrantedAsync(AutomationPermissions.Grades.Edit);
+        _canDelete = await AuthorizationService.IsGrantedAsync(AutomationPermissions.Grades.Delete);
     }
 
     private async Task LoadCoursesAsync()
@@ -159,6 +180,12 @@ else
     }
 
     private void ResetRow(GradeRowVm r) => r.Score = 0;
+
+    // private async Task SaveRowAsync(GradeRowVm r)
+    // {
+    //     if (!_canEdit) return;
+    //     await GradesApp.UpsertAsync(new UpsertGradeDto { EnrollmentId = r.EnrollmentId, Score = r.Score });
+    // }
 
     private class GradeRowVm
     {

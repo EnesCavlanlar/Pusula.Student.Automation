@@ -1,14 +1,23 @@
 ﻿@page "/admin/teachers"
+@using Pusula.Student.Automation.Permissions
+@attribute [Authorize(AutomationPermissions.Teachers.Default)]
+
+@using Microsoft.AspNetCore.Authorization
+@using Volo.Abp.Authorization            @* IsGrantedAsync extension *@
 @using Pusula.Student.Automation.Teachers
 @using Volo.Abp.Application.Dtos
 @using Microsoft.AspNetCore.Components
 @using Microsoft.AspNetCore.Components.Forms
 @inject ITeacherAppService TeachersApp
+@inject IAuthorizationService AuthorizationService
 
 <h3 class="mb-3">Teachers</h3>
 
 <div class="d-flex gap-2 align-items-center mb-3">
-    <button class="btn btn-primary" @onclick="ShowCreate">+ New Teacher</button>
+    @if (_canCreate)
+    {
+        <button class="btn btn-primary" @onclick="ShowCreate">+ New Teacher</button>
+    }
 
     <input class="form-control" style="max-width: 260px"
            placeholder="Search by name or email..."
@@ -57,8 +66,14 @@ else
                     <td>@t.Email</td>
                     <td>@t.Department</td>
                     <td class="text-nowrap">
-                        <button class="btn btn-sm btn-secondary me-2" @onclick="() => Edit(t)">Edit</button>
-                        <button class="btn btn-sm btn-danger" @onclick="() => ConfirmDelete(t.Id)">Delete</button>
+                        @if (_canEdit)
+                        {
+                            <button class="btn btn-sm btn-secondary me-2" @onclick="() => Edit(t)">Edit</button>
+                        }
+                        @if (_canDelete)
+                        {
+                            <button class="btn btn-sm btn-danger" @onclick="() => ConfirmDelete(t.Id)">Delete</button>
+                        }
                     </td>
                 </tr>
             }
@@ -95,7 +110,6 @@ else
 
                 <EditForm Model="_form" OnValidSubmit="SaveAsync">
                     <DataAnnotationsValidator />
-                    @* Blazorise ile çakışmayı önlemek için tam ad kullanıyoruz *@
                     <Microsoft.AspNetCore.Components.Forms.ValidationSummary />
 
                     <div class="modal-body">
@@ -121,13 +135,18 @@ else
 
                     <div class="modal-footer">
                         <button class="btn btn-secondary" type="button" @onclick="CloseModal" disabled="@_busy">Cancel</button>
-                        <button class="btn btn-primary" type="submit" disabled="@_busy">
-                            @if (_busy)
-                            {
-                                <span class="spinner-border spinner-border-sm me-2"></span>
-                            }
-                            Save
-                        </button>
+
+                        @* Save: create için Create izni, edit için Edit izni şart *@
+                        @if ((_editId is null && _canCreate) || (_editId is not null && _canEdit))
+                        {
+                            <button class="btn btn-primary" type="submit" disabled="@_busy">
+                                @if (_busy)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2"></span>
+                                }
+                                Save
+                            </button>
+                        }
                     </div>
                 </EditForm>
             </div>
@@ -149,13 +168,17 @@ else
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" @onclick="() => _showDeleteConfirm = false">Cancel</button>
-                    <button class="btn btn-danger" @onclick="DeleteAsync" disabled="@_busy">
-                        @if (_busy)
-                        {
-                            <span class="spinner-border spinner-border-sm me-2"></span>
-                        }
-                        Delete
-                    </button>
+
+                    @if (_canDelete)
+                    {
+                        <button class="btn btn-danger" @onclick="DeleteAsync" disabled="@_busy">
+                            @if (_busy)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                            }
+                            Delete
+                        </button>
+                    }
                 </div>
             </div>
         </div>
@@ -165,9 +188,12 @@ else
 @code {
     // state
     private List<TeacherDto> _items = new();
-    private long _totalCount;                   // <-- long yapıldı
+    private long _totalCount;
     private bool _loading;
     private bool _busy;
+
+    // permissions
+    private bool _canCreate, _canEdit, _canDelete;
 
     // paging & sorting & search
     private int _pageIndex = 0;
@@ -185,7 +211,18 @@ else
     private bool _showDeleteConfirm;
     private Guid _pendingDeleteId;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        await CheckPermissionsAsync();
+        await LoadAsync();
+    }
+
+    private async Task CheckPermissionsAsync()
+    {
+        _canCreate = await AuthorizationService.IsGrantedAsync(AutomationPermissions.Teachers.Create);
+        _canEdit = await AuthorizationService.IsGrantedAsync(AutomationPermissions.Teachers.Edit);
+        _canDelete = await AuthorizationService.IsGrantedAsync(AutomationPermissions.Teachers.Delete);
+    }
 
     private async Task LoadAsync()
     {
@@ -200,7 +237,7 @@ else
 
         var list = await TeachersApp.GetListAsync(input);
 
-        // client-side filter (lightweight)
+        // client-side filter
         var items = list.Items.AsEnumerable();
         if (!string.IsNullOrWhiteSpace(_search))
         {
@@ -211,7 +248,7 @@ else
                 (i.Email ?? "").ToLowerInvariant().Contains(s));
         }
 
-        // client-side sort (gerekirse)
+        // client-side sort
         if (!string.IsNullOrWhiteSpace(_sort))
         {
             Func<TeacherDto, object?> key = _sort switch
@@ -225,7 +262,7 @@ else
         }
 
         _items = items.ToList();
-        _totalCount = list.TotalCount; // long
+        _totalCount = list.TotalCount;
         _loading = false;
         StateHasChanged();
     }

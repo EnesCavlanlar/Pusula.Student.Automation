@@ -1,4 +1,9 @@
 ﻿@page "/admin/enrollments"
+@using Pusula.Student.Automation.Permissions
+@attribute [Authorize(AutomationPermissions.Enrollments.Default)]
+
+@using Microsoft.AspNetCore.Authorization
+@using Volo.Abp.Authorization                 @* IsGrantedAsync extension *@
 @using Pusula.Student.Automation.Enrollments
 @using Pusula.Student.Automation.Students
 @using Pusula.Student.Automation.Courses
@@ -9,11 +14,15 @@
 @inject IEnrollmentAppService EnrollmentsApp
 @inject IStudentAppService StudentsApp
 @inject ICourseAppService CoursesApp
+@inject IAuthorizationService AuthorizationService
 
 <h3 class="mb-3">Enrollments</h3>
 
 <div class="d-flex gap-2 align-items-center mb-3">
-    <button class="btn btn-primary" @onclick="ShowCreate">+ New Enrollment</button>
+    @if (_canCreate)
+    {
+        <button class="btn btn-primary" @onclick="ShowCreate">+ New Enrollment</button>
+    }
 
     <input class="form-control" style="max-width: 320px"
            placeholder="Search by student or course..."
@@ -54,8 +63,14 @@ else
                     <td>@StudentLabel(e.StudentId)</td>
                     <td>@CourseLabel(e.CourseId)</td>
                     <td class="text-nowrap">
-                        <button class="btn btn-sm btn-secondary me-2" @onclick="() => Edit(e)">Edit</button>
-                        <button class="btn btn-sm btn-danger" @onclick="() => ConfirmDelete(e.Id)">Delete</button>
+                        @if (_canEdit)
+                        {
+                            <button class="btn btn-sm btn-secondary me-2" @onclick="() => Edit(e)">Edit</button>
+                        }
+                        @if (_canDelete)
+                        {
+                            <button class="btn btn-sm btn-danger" @onclick="() => ConfirmDelete(e.Id)">Delete</button>
+                        }
                     </td>
                 </tr>
             }
@@ -104,7 +119,6 @@ else
                             <div class="col-md-6">
                                 <label class="form-label">Student</label>
                                 <InputSelect class="form-select" @bind-Value="_form.StudentId">
-                                    <!-- Guid tipinde olduğu için boş seçenek Guid.Empty olmalı -->
                                     <option value="@Guid.Empty">— Select —</option>
                                     @foreach (var s in _allStudents)
                                     {
@@ -128,13 +142,17 @@ else
 
                     <div class="modal-footer">
                         <button class="btn btn-secondary" type="button" @onclick="CloseModal" disabled="@_busy">Cancel</button>
-                        <button class="btn btn-primary" type="submit" disabled="@_busy">
-                            @if (_busy)
-                            {
-                                <span class="spinner-border spinner-border-sm me-2"></span>
-                            }
-                            Save
-                        </button>
+
+                        @if ((_editId is null && _canCreate) || (_editId is not null && _canEdit))
+                        {
+                            <button class="btn btn-primary" type="submit" disabled="@_busy">
+                                @if (_busy)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2"></span>
+                                }
+                                Save
+                            </button>
+                        }
                     </div>
                 </EditForm>
             </div>
@@ -156,13 +174,17 @@ else
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" @onclick="() => _showDeleteConfirm = false">Cancel</button>
-                    <button class="btn btn-danger" @onclick="DeleteAsync" disabled="@_busy">
-                        @if (_busy)
-                        {
-                            <span class="spinner-border spinner-border-sm me-2"></span>
-                        }
-                        Delete
-                    </button>
+
+                    @if (_canDelete)
+                    {
+                        <button class="btn btn-danger" @onclick="DeleteAsync" disabled="@_busy">
+                            @if (_busy)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                            }
+                            Delete
+                        </button>
+                    }
                 </div>
             </div>
         </div>
@@ -175,6 +197,9 @@ else
     private long _totalCount;
     private bool _loading;
     private bool _busy;
+
+    // permissions
+    private bool _canCreate, _canEdit, _canDelete;
 
     // paging & sorting & search
     private int _pageIndex = 0;
@@ -201,8 +226,16 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        await CheckPermissionsAsync();
         await LoadLookupsAsync();
         await LoadAsync();
+    }
+
+    private async Task CheckPermissionsAsync()
+    {
+        _canCreate = await AuthorizationService.IsGrantedAsync(AutomationPermissions.Enrollments.Create);
+        _canEdit = await AuthorizationService.IsGrantedAsync(AutomationPermissions.Enrollments.Edit);
+        _canDelete = await AuthorizationService.IsGrantedAsync(AutomationPermissions.Enrollments.Delete);
     }
 
     private async Task LoadLookupsAsync()
@@ -294,7 +327,6 @@ else
     {
         _editId = null;
         _formError = string.Empty;
-        // Guid alanları boş seçenekle uyumlu hale getir
         _form = new CreateUpdateEnrollmentVm { StudentId = Guid.Empty, CourseId = Guid.Empty };
         _showModal = true;
     }
@@ -342,7 +374,9 @@ else
                     StudentId = _form.StudentId,
                     CourseId = _form.CourseId
                 };
-                await EnrollmentsApp.CreateAsync(create);
+
+                if (_canCreate)
+                    await EnrollmentsApp.CreateAsync(create);
             }
             else
             {
@@ -351,7 +385,9 @@ else
                     StudentId = _form.StudentId,
                     CourseId = _form.CourseId
                 };
-                await EnrollmentsApp.UpdateAsync(_editId.Value, update);
+
+                if (_canEdit)
+                    await EnrollmentsApp.UpdateAsync(_editId.Value, update);
             }
 
             _showModal = false;
@@ -406,13 +442,15 @@ else
     private async Task DeleteAsync()
     {
         _busy = true;
-        await EnrollmentsApp.DeleteAsync(_pendingDeleteId);
+
+        if (_canDelete)
+            await EnrollmentsApp.DeleteAsync(_pendingDeleteId);
+
         _busy = false;
         _showDeleteConfirm = false;
         await LoadAsync();
     }
 
-    // Basit form-viewmodel (UI için)
     private class CreateUpdateEnrollmentVm
     {
         public Guid StudentId { get; set; }
