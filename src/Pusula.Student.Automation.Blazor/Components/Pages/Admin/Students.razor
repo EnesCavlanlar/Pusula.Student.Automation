@@ -2,7 +2,6 @@
 @inject IStudentAppService StudentsApp
 @using Pusula.Student.Automation.Students
 @using Volo.Abp.Application.Dtos
-@using Microsoft.AspNetCore.Components.Forms
 
 <h3>Students</h3>
 
@@ -72,8 +71,7 @@ else
                     </div>
                     <div class="mb-2">
                         <label class="form-label">Birth Date</label>
-                        <!-- STRING yerine DateTime? ile InputDate kullan -->
-                        <InputDate @bind-Value="_birth" class="form-control" />
+                        <InputDate @bind-Value="_form.BirthDate" class="form-control" />
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -88,17 +86,11 @@ else
 @code {
     private bool _loading = true;
     private List<StudentDto> _items = new();
-    private bool _showModal = false;
-    private Guid? _editId = null;
+    private bool _showModal;
+    private Guid? _editId;
     private CreateUpdateStudentDto _form = new();
 
-    // Date picker için DateTime?
-    private DateTime? _birth;
-
-    protected override async Task OnInitializedAsync()
-    {
-        await LoadAsync();
-    }
+    protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task LoadAsync()
     {
@@ -106,14 +98,12 @@ else
         var list = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
         _items = list.Items.ToList();
         _loading = false;
-        StateHasChanged();
     }
 
     private void ShowCreate()
     {
         _editId = null;
         _form = new();
-        _birth = null;
         _showModal = true;
     }
 
@@ -128,14 +118,11 @@ else
             Email = s.Email,
             BirthDate = s.BirthDate
         };
-        _birth = s.BirthDate?.Date;
         _showModal = true;
     }
 
     private async Task Save()
     {
-        _form.BirthDate = _birth; // doğrudan ata
-
         if (_editId == null)
             await StudentsApp.CreateAsync(_form);
         else

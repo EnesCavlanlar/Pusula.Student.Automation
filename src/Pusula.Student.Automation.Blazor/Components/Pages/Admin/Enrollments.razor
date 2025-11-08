@@ -1,130 +1,421 @@
 ﻿@page "/admin/enrollments"
-@using Volo.Abp.Application.Dtos
 @using Pusula.Student.Automation.Enrollments
 @using Pusula.Student.Automation.Students
 @using Pusula.Student.Automation.Courses
+@using Volo.Abp.Application.Dtos
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Forms
+
 @inject IEnrollmentAppService EnrollmentsApp
 @inject IStudentAppService StudentsApp
 @inject ICourseAppService CoursesApp
 
-<h3>Enrollments</h3>
+<h3 class="mb-3">Enrollments</h3>
 
-<div class="card p-3 mb-3">
-    <div class="row g-2 align-items-end">
-        <div class="col-md-4">
-            <label class="form-label">Student</label>
-            <select class="form-select" @bind="_create.StudentId">
-                <option value="@Guid.Empty">-- select student --</option>
-                @foreach (var s in _students)
-                {
-                    <option value="@s.Id">@s.StudentNo - @s.FirstName @s.LastName</option>
-                }
-            </select>
-        </div>
-        <div class="col-md-4">
-            <label class="form-label">Course</label>
-            <select class="form-select" @bind="_create.CourseId">
-                <option value="@Guid.Empty">-- select course --</option>
-                @foreach (var c in _courses)
-                {
-                    <option value="@c.Id">@c.Code - @c.Name</option>
-                }
-            </select>
-        </div>
-        <div class="col-md-2">
-            <label class="form-label">Date</label>
-            <InputDate @bind-Value="_createDate" class="form-control" />
-        </div>
-        <div class="col-md-2">
-            <button class="btn btn-primary w-100" @onclick="Create">Add</button>
-        </div>
-    </div>
+<div class="d-flex gap-2 align-items-center mb-3">
+    <button class="btn btn-primary" @onclick="ShowCreate">+ New Enrollment</button>
+
+    <input class="form-control" style="max-width: 320px"
+           placeholder="Search by student or course..."
+           @bind="_search" @bind:event="oninput" />
+    <button class="btn btn-outline-secondary" @onclick="LoadAsync">Search</button>
 </div>
 
 @if (_loading)
 {
     <p>Loading...</p>
 }
+else if (_items.Count == 0)
+{
+    <div class="alert alert-info">No enrollments found.</div>
+}
 else
 {
-    <table class="table table-striped">
+    <table class="table table-striped align-middle">
         <thead>
             <tr>
-                <th>Student</th>
-                <th>Course</th>
-                <th>Date</th>
-                <th style="width:100px;"></th>
+                <th style="width: 280px;">
+                    <button class="btn btn-link p-0" @onclick="() => SortBy(nameof(EnrollmentDto.StudentId))">
+                        Student @SortGlyph(nameof(EnrollmentDto.StudentId))
+                    </button>
+                </th>
+                <th style="width: 320px;">
+                    <button class="btn btn-link p-0" @onclick="() => SortBy(nameof(EnrollmentDto.CourseId))">
+                        Course @SortGlyph(nameof(EnrollmentDto.CourseId))
+                    </button>
+                </th>
+                <th style="width: 160px;">Actions</th>
             </tr>
         </thead>
         <tbody>
             @foreach (var e in _items)
             {
                 <tr>
-                    <td>@ViewStudent(e.StudentId)</td>
-                    <td>@ViewCourse(e.CourseId)</td>
-                    <td>@e.EnrollmentDate.ToString("yyyy-MM-dd")</td>
-                    <td>
-                        <button class="btn btn-sm btn-danger" @onclick="() => Delete(e.Id)">Delete</button>
+                    <td>@StudentLabel(e.StudentId)</td>
+                    <td>@CourseLabel(e.CourseId)</td>
+                    <td class="text-nowrap">
+                        <button class="btn btn-sm btn-secondary me-2" @onclick="() => Edit(e)">Edit</button>
+                        <button class="btn btn-sm btn-danger" @onclick="() => ConfirmDelete(e.Id)">Delete</button>
                     </td>
                 </tr>
             }
         </tbody>
     </table>
+
+    <div class="d-flex justify-content-between align-items-center">
+        <div>Total: @_totalCount</div>
+        <div class="btn-group">
+            <button class="btn btn-outline-secondary"
+                    disabled="@(_pageIndex == 0)"
+                    @onclick="PrevPage">
+                Prev
+            </button>
+
+            <button class="btn btn-outline-secondary"
+                    disabled="@(((long)_pageIndex + 1L) * _pageSize >= _totalCount)"
+                    @onclick="NextPage">
+                Next
+            </button>
+        </div>
+    </div>
+}
+
+@if (_showModal)
+{
+    <div class="modal fade show d-block" style="background: rgba(0,0,0,.5);" @onclick="CloseModal">
+        <div class="modal-dialog" @onclick:stopPropagation>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(_editId is null ? "Create Enrollment" : "Edit Enrollment")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseModal"></button>
+                </div>
+
+                <EditForm Model="_form" OnValidSubmit="SaveAsync">
+                    <DataAnnotationsValidator />
+                    <Microsoft.AspNetCore.Components.Forms.ValidationSummary />
+
+                    <div class="modal-body">
+                        @if (!string.IsNullOrWhiteSpace(_formError))
+                        {
+                            <div class="alert alert-danger">@_formError</div>
+                        }
+
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Student</label>
+                                <InputSelect class="form-select" @bind-Value="_form.StudentId">
+                                    <!-- Guid tipinde olduğu için boş seçenek Guid.Empty olmalı -->
+                                    <option value="@Guid.Empty">— Select —</option>
+                                    @foreach (var s in _allStudents)
+                                    {
+                                        <option value="@s.Id">@StudentLabel(s.Id)</option>
+                                    }
+                                </InputSelect>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label">Course</label>
+                                <InputSelect class="form-select" @bind-Value="_form.CourseId">
+                                    <option value="@Guid.Empty">— Select —</option>
+                                    @foreach (var c in _allCourses)
+                                    {
+                                        <option value="@c.Id">@CourseLabel(c.Id)</option>
+                                    }
+                                </InputSelect>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" type="button" @onclick="CloseModal" disabled="@_busy">Cancel</button>
+                        <button class="btn btn-primary" type="submit" disabled="@_busy">
+                            @if (_busy)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                            }
+                            Save
+                        </button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_showDeleteConfirm)
+{
+    <div class="modal fade show d-block" style="background: rgba(0,0,0,.5);" @onclick="() => _showDeleteConfirm = false">
+        <div class="modal-dialog modal-sm" @onclick:stopPropagation>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirm</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="() => _showDeleteConfirm = false"></button>
+                </div>
+                <div class="modal-body">
+                    Delete this enrollment?
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => _showDeleteConfirm = false">Cancel</button>
+                    <button class="btn btn-danger" @onclick="DeleteAsync" disabled="@_busy">
+                        @if (_busy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Delete
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 }
 
 @code {
-    private bool _loading = true;
+    // state
     private List<EnrollmentDto> _items = new();
-    private List<StudentDto> _students = new();
-    private List<CourseDto> _courses = new();
+    private long _totalCount;
+    private bool _loading;
+    private bool _busy;
 
-    private CreateEnrollmentDto _create = new();
-    private DateTime? _createDate = DateTime.UtcNow.Date;
+    // paging & sorting & search
+    private int _pageIndex = 0;
+    private int _pageSize = 10;
+    private string? _sort = nameof(EnrollmentDto.StudentId);
+    private bool _sortAsc = true;
+    private string _search = string.Empty;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    // form modal
+    private bool _showModal;
+    private Guid? _editId;
+
+    // Form VM
+    private CreateUpdateEnrollmentVm _form = new();
+    private string _formError = string.Empty;
+
+    // delete confirm
+    private bool _showDeleteConfirm;
+    private Guid _pendingDeleteId;
+
+    // lookups
+    private List<StudentDto> _allStudents = new();
+    private List<CourseDto> _allCourses = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadLookupsAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadLookupsAsync()
+    {
+        var students = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+        {
+            MaxResultCount = 2000,
+            SkipCount = 0,
+            Sorting = nameof(StudentDto.FirstName) + " ASC"
+        });
+        _allStudents = students.Items.ToList();
+
+        var courses = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto
+        {
+            MaxResultCount = 2000,
+            SkipCount = 0,
+            Sorting = nameof(CourseDto.Code) + " ASC"
+        });
+        _allCourses = courses.Items.ToList();
+    }
+
+    private string StudentLabel(Guid id)
+    {
+        var s = _allStudents.FirstOrDefault(x => x.Id == id);
+        if (s is null) return "—";
+        var no = string.IsNullOrWhiteSpace(s.StudentNo) ? "" : $" [{s.StudentNo}]";
+        return $"{s.FirstName} {s.LastName}{no}";
+    }
+
+    private string CourseLabel(Guid id)
+    {
+        var c = _allCourses.FirstOrDefault(x => x.Id == id);
+        if (c is null) return "—";
+        var code = string.IsNullOrWhiteSpace(c.Code) ? "" : $" ({c.Code})";
+        return $"{c.Name}{code}";
+    }
 
     private async Task LoadAsync()
     {
         _loading = true;
 
-        var sl = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
-        _students = sl.Items.ToList();
+        var input = new PagedAndSortedResultRequestDto
+        {
+            SkipCount = _pageIndex * _pageSize,
+            MaxResultCount = _pageSize,
+            Sorting = _sort is null ? null : $"{_sort} {(_sortAsc ? "ASC" : "DESC")}"
+        };
 
-        var cl = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
-        _courses = cl.Items.ToList();
+        var list = await EnrollmentsApp.GetListAsync(input);
 
-        var el = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
-        _items = el.Items.ToList();
+        var items = list.Items.AsEnumerable();
 
+        if (!string.IsNullOrWhiteSpace(_search))
+        {
+            var s = _search.Trim().ToLowerInvariant();
+            items = items.Where(e =>
+            {
+                var st = _allStudents.FirstOrDefault(x => x.Id == e.StudentId);
+                var co = _allCourses.FirstOrDefault(x => x.Id == e.CourseId);
+                var studentHit = st != null &&
+                                 ($"{st.FirstName} {st.LastName}".ToLowerInvariant().Contains(s) ||
+                                  (st.StudentNo ?? "").ToLowerInvariant().Contains(s) ||
+                                  (st.Email ?? "").ToLowerInvariant().Contains(s));
+                var courseHit = co != null &&
+                                ((co.Code ?? "").ToLowerInvariant().Contains(s) ||
+                                 (co.Name ?? "").ToLowerInvariant().Contains(s));
+                return studentHit || courseHit;
+            });
+        }
+
+        if (!string.IsNullOrWhiteSpace(_sort))
+        {
+            Func<EnrollmentDto, string> key = _sort switch
+            {
+                nameof(EnrollmentDto.StudentId) => e => StudentLabel(e.StudentId),
+                nameof(EnrollmentDto.CourseId) => e => CourseLabel(e.CourseId),
+                _ => e => StudentLabel(e.StudentId)
+            };
+            items = _sortAsc ? items.OrderBy(key) : items.OrderByDescending(key);
+        }
+
+        _items = items.ToList();
+        _totalCount = list.TotalCount;
         _loading = false;
+        StateHasChanged();
     }
 
-    private async Task Create()
+    private void ShowCreate()
     {
-        if (_create.StudentId == Guid.Empty || _create.CourseId == Guid.Empty) return;
-        _create.EnrollmentDate = _createDate ?? DateTime.UtcNow;
+        _editId = null;
+        _formError = string.Empty;
+        // Guid alanları boş seçenekle uyumlu hale getir
+        _form = new CreateUpdateEnrollmentVm { StudentId = Guid.Empty, CourseId = Guid.Empty };
+        _showModal = true;
+    }
 
-        await EnrollmentsApp.CreateAsync(_create);
-        _create = new();
-        _createDate = DateTime.UtcNow.Date;
+    private void Edit(EnrollmentDto dto)
+    {
+        _editId = dto.Id;
+        _formError = string.Empty;
+        _form = new CreateUpdateEnrollmentVm
+        {
+            StudentId = dto.StudentId,
+            CourseId = dto.CourseId
+        };
+        _showModal = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        _formError = string.Empty;
+
+        if (_form.StudentId == Guid.Empty || _form.CourseId == Guid.Empty)
+        {
+            _formError = "Please select both student and course.";
+            _busy = false; return;
+        }
+
+        var duplicate = _items.Any(e =>
+            e.StudentId == _form.StudentId &&
+            e.CourseId == _form.CourseId &&
+            (_editId == null || e.Id != _editId.Value));
+
+        if (duplicate)
+        {
+            _formError = "This student is already enrolled in the selected course.";
+            _busy = false; return;
+        }
+
+        try
+        {
+            if (_editId is null)
+            {
+                var create = new CreateEnrollmentDto
+                {
+                    StudentId = _form.StudentId,
+                    CourseId = _form.CourseId
+                };
+                await EnrollmentsApp.CreateAsync(create);
+            }
+            else
+            {
+                var update = new CreateEnrollmentDto
+                {
+                    StudentId = _form.StudentId,
+                    CourseId = _form.CourseId
+                };
+                await EnrollmentsApp.UpdateAsync(_editId.Value, update);
+            }
+
+            _showModal = false;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _formError = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void CloseModal() => _showModal = false;
+
+    private void SortBy(string field)
+    {
+        if (_sort == field) _sortAsc = !_sortAsc;
+        else { _sort = field; _sortAsc = true; }
+        _ = LoadAsync();
+    }
+
+    private MarkupString SortGlyph(string field)
+    {
+        if (_sort != field) return (MarkupString)string.Empty;
+        var glyph = _sortAsc ? "▲" : "▼";
+        return (MarkupString)$"<span class='ms-1'>{glyph}</span>";
+    }
+
+    private void PrevPage()
+    {
+        if (_pageIndex == 0) return;
+        _pageIndex--;
+        _ = LoadAsync();
+    }
+
+    private void NextPage()
+    {
+        if (((long)_pageIndex + 1L) * _pageSize >= _totalCount) return;
+        _pageIndex++;
+        _ = LoadAsync();
+    }
+
+    private void ConfirmDelete(Guid id)
+    {
+        _pendingDeleteId = id;
+        _showDeleteConfirm = true;
+    }
+
+    private async Task DeleteAsync()
+    {
+        _busy = true;
+        await EnrollmentsApp.DeleteAsync(_pendingDeleteId);
+        _busy = false;
+        _showDeleteConfirm = false;
         await LoadAsync();
     }
 
-    private async Task Delete(Guid id)
+    // Basit form-viewmodel (UI için)
+    private class CreateUpdateEnrollmentVm
     {
-        await EnrollmentsApp.DeleteAsync(id);
-        await LoadAsync();
-    }
-
-    private string ViewStudent(Guid id)
-    {
-        var s = _students.FirstOrDefault(x => x.Id == id);
-        return s is null ? id.ToString() : $"{s.StudentNo} - {s.FirstName} {s.LastName}";
-    }
-
-    private string ViewCourse(Guid id)
-    {
-        var c = _courses.FirstOrDefault(x => x.Id == id);
-        return c is null ? id.ToString() : $"{c.Code} - {c.Name}";
+        public Guid StudentId { get; set; }
+        public Guid CourseId { get; set; }
     }
 }

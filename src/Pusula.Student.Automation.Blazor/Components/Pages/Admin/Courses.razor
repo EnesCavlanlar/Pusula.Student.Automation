@@ -2,29 +2,52 @@
 @using Pusula.Student.Automation.Courses
 @using Pusula.Student.Automation.Teachers
 @using Volo.Abp.Application.Dtos
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Forms
 @inject ICourseAppService CoursesApp
 @inject ITeacherAppService TeachersApp
 
-<h3>Courses</h3>
+<h3 class="mb-3">Courses</h3>
 
-<div class="mb-3">
+<div class="d-flex gap-2 align-items-center mb-3">
     <button class="btn btn-primary" @onclick="ShowCreate">+ New Course</button>
+
+    <input class="form-control" style="max-width: 260px"
+           placeholder="Search by code or name..."
+           @bind="_search" @bind:event="oninput" />
+    <button class="btn btn-outline-secondary" @onclick="LoadAsync">Search</button>
 </div>
 
 @if (_loading)
 {
     <p>Loading...</p>
 }
+else if (_items.Count == 0)
+{
+    <div class="alert alert-info">No courses found.</div>
+}
 else
 {
-    <table class="table table-striped">
+    <table class="table table-striped align-middle">
         <thead>
             <tr>
-                <th>Code</th>
-                <th>Name</th>
-                <th>Credit</th>
-                <th>Teacher</th>
-                <th style="width:160px;"></th>
+                <th style="width:160px;">
+                    <button class="btn btn-link p-0" @onclick="() => SortBy(nameof(CourseDto.Code))">
+                        Code @SortGlyph(nameof(CourseDto.Code))
+                    </button>
+                </th>
+                <th>
+                    <button class="btn btn-link p-0" @onclick="() => SortBy(nameof(CourseDto.Name))">
+                        Name @SortGlyph(nameof(CourseDto.Name))
+                    </button>
+                </th>
+                <th style="width:120px;">
+                    <button class="btn btn-link p-0" @onclick="() => SortBy(nameof(CourseDto.Credit))">
+                        Credit @SortGlyph(nameof(CourseDto.Credit))
+                    </button>
+                </th>
+                <th style="width:260px;">Teacher</th>
+                <th style="width:160px;">Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -33,54 +56,118 @@ else
                 <tr>
                     <td>@c.Code</td>
                     <td>@c.Name</td>
-                    <td>@c.Credit</td>
-                    <td>@(_teacherMap.TryGetValue(c.TeacherId, out var t) ? $"{t.FirstName} {t.LastName}" : c.TeacherId.ToString())</td>
-                    <td>
+                    <td>@(c.Credit ?? 0)</td>
+                    <td>@TeacherName(c.TeacherId)</td>
+                    <td class="text-nowrap">
                         <button class="btn btn-sm btn-secondary me-2" @onclick="() => Edit(c)">Edit</button>
-                        <button class="btn btn-sm btn-danger" @onclick="() => Delete(c.Id)">Delete</button>
+                        <button class="btn btn-sm btn-danger" @onclick="() => ConfirmDelete(c.Id)">Delete</button>
                     </td>
                 </tr>
             }
         </tbody>
     </table>
+
+    <div class="d-flex justify-content-between align-items-center">
+        <div>Total: @_totalCount</div>
+        <div class="btn-group">
+            <button class="btn btn-outline-secondary"
+                    disabled="@(_pageIndex == 0)"
+                    @onclick="PrevPage">
+                Prev
+            </button>
+
+            <button class="btn btn-outline-secondary"
+                    disabled="@(((long)_pageIndex + 1L) * _pageSize >= _totalCount)"
+                    @onclick="NextPage">
+                Next
+            </button>
+        </div>
+    </div>
 }
 
 @if (_showModal)
 {
-    <div class="modal fade show d-block" style="background:rgba(0,0,0,.5);" @onclick="CloseModal">
+    <div class="modal fade show d-block" style="background: rgba(0,0,0,.5);" @onclick="CloseModal">
         <div class="modal-dialog" @onclick:stopPropagation>
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">@(_editId == null ? "Create Course" : "Edit Course")</h5>
-                    <button type="button" class="btn-close" @onclick="CloseModal"></button>
+                    <h5 class="modal-title">@(_editId is null ? "Create Course" : "Edit Course")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseModal"></button>
+                </div>
+
+                <EditForm Model="_form" OnValidSubmit="SaveAsync">
+                    <DataAnnotationsValidator />
+                    <Microsoft.AspNetCore.Components.Forms.ValidationSummary />
+
+                    <div class="modal-body">
+                        @if (!string.IsNullOrWhiteSpace(_formError))
+                        {
+                            <div class="alert alert-danger">@_formError</div>
+                        }
+
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">Code</label>
+                                <InputText class="form-control" @bind-Value="_form.Code" />
+                            </div>
+                            <div class="col-md-8">
+                                <label class="form-label">Name</label>
+                                <InputText class="form-control" @bind-Value="_form.Name" />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Credit</label>
+                                <InputNumber class="form-control" @bind-Value="_form.Credit" />
+                            </div>
+                            <div class="col-md-8">
+                                <label class="form-label">Teacher</label>
+                                <InputSelect class="form-select" @bind-Value="_form.TeacherId">
+                                    <option value="@Guid.Empty">— Select —</option>
+                                    @foreach (var t in _allTeachers)
+                                    {
+                                        <option value="@t.Id">@t.FirstName @t.LastName (@t.Email)</option>
+                                    }
+                                </InputSelect>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" type="button" @onclick="CloseModal" disabled="@_busy">Cancel</button>
+                        <button class="btn btn-primary" type="submit" disabled="@_busy">
+                            @if (_busy)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                            }
+                            Save
+                        </button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_showDeleteConfirm)
+{
+    <div class="modal fade show d-block" style="background: rgba(0,0,0,.5);" @onclick="() => _showDeleteConfirm = false">
+        <div class="modal-dialog modal-sm" @onclick:stopPropagation>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirm</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="() => _showDeleteConfirm = false"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="mb-2">
-                        <label class="form-label">Name</label>
-                        <input class="form-control" @bind="_form.Name" />
-                    </div>
-                    <div class="mb-2">
-                        <label class="form-label">Code</label>
-                        <input class="form-control" @bind="_form.Code" />
-                    </div>
-                    <div class="mb-2">
-                        <label class="form-label">Credit</label>
-                        <input class="form-control" type="number" @bind="_form.Credit" />
-                    </div>
-                    <div class="mb-2">
-                        <label class="form-label">Teacher</label>
-                        <select class="form-select" @bind="_form.TeacherId">
-                            <option value="@Guid.Empty">-- select teacher --</option>
-                            @foreach (var t in _teachers)
-                            {
-                                <option value="@t.Id">@t.FirstName @t.LastName (@t.Email)</option>
-                            }
-                        </select>
-                    </div>
+                    Delete this course?
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-secondary" @onclick="CloseModal">Cancel</button>
-                    <button class="btn btn-primary" @onclick="Save">Save</button>
+                    <button class="btn btn-secondary" @onclick="() => _showDeleteConfirm = false">Cancel</button>
+                    <button class="btn btn-danger" @onclick="DeleteAsync" disabled="@_busy">
+                        @if (_busy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        Delete
+                    </button>
                 </div>
             </div>
         </div>
@@ -88,62 +175,216 @@ else
 }
 
 @code {
-    private bool _loading = true;
+    // state
     private List<CourseDto> _items = new();
-    private List<TeacherDto> _teachers = new();
-    private Dictionary<Guid, TeacherDto> _teacherMap = new();
-    private bool _showModal = false;
-    private Guid? _editId = null;
-    private CreateUpdateCourseDto _form = new();
+    private long _totalCount;
+    private bool _loading;
+    private bool _busy;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    // paging & sorting & search
+    private int _pageIndex = 0;
+    private int _pageSize = 10;
+    private string? _sort = nameof(CourseDto.Code);
+    private bool _sortAsc = true;
+    private string _search = string.Empty;
+
+    // form modal
+    private bool _showModal;
+    private Guid? _editId;
+
+    // ViewModel (Guid.Empty boş seçeneği için)
+    private CreateUpdateCourseVm _form = new();
+    private string _formError = string.Empty;
+
+    // delete confirm
+    private bool _showDeleteConfirm;
+    private Guid _pendingDeleteId;
+
+    // teachers for dropdown
+    private List<TeacherDto> _allTeachers = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadTeachersAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadTeachersAsync()
+    {
+        var teachers = await TeachersApp.GetListAsync(new PagedAndSortedResultRequestDto
+        {
+            MaxResultCount = 1000,
+            SkipCount = 0,
+            Sorting = nameof(TeacherDto.FirstName) + " ASC"
+        });
+        _allTeachers = teachers.Items.ToList();
+    }
+
+    private string TeacherName(Guid? id)
+    {
+        if (id is null) return "—";
+        var t = _allTeachers.FirstOrDefault(x => x.Id == id.Value);
+        return t is null ? "—" : $"{t.FirstName} {t.LastName}";
+    }
 
     private async Task LoadAsync()
     {
         _loading = true;
 
-        // teachers
-        var tl = await TeachersApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
-        _teachers = tl.Items.ToList();
-        _teacherMap = _teachers.ToDictionary(t => t.Id, t => t);
+        var input = new PagedAndSortedResultRequestDto
+        {
+            SkipCount = _pageIndex * _pageSize,
+            MaxResultCount = _pageSize,
+            Sorting = _sort is null ? null : $"{_sort} {(_sortAsc ? "ASC" : "DESC")}"
+        };
 
-        // courses
-        var cl = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
-        _items = cl.Items.ToList();
+        var list = await CoursesApp.GetListAsync(input);
 
+        var items = list.Items.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(_search))
+        {
+            var s = _search.Trim().ToLowerInvariant();
+            items = items.Where(i =>
+                (i.Code ?? "").ToLowerInvariant().Contains(s) ||
+                (i.Name ?? "").ToLowerInvariant().Contains(s));
+        }
+
+        if (!string.IsNullOrWhiteSpace(_sort))
+        {
+            Func<CourseDto, object?> key = _sort switch
+            {
+                nameof(CourseDto.Code) => i => i.Code,
+                nameof(CourseDto.Name) => i => i.Name,
+                nameof(CourseDto.Credit) => i => i.Credit,
+                _ => i => i.Code
+            };
+            items = _sortAsc ? items.OrderBy(key) : items.OrderByDescending(key);
+        }
+
+        _items = items.ToList();
+        _totalCount = list.TotalCount; // long
         _loading = false;
+        StateHasChanged();
     }
 
     private void ShowCreate()
     {
         _editId = null;
-        _form = new();
+        _formError = string.Empty;
+        _form = new CreateUpdateCourseVm
+        {
+            Credit = 3,
+            TeacherId = Guid.Empty // boş/“select”
+        };
         _showModal = true;
     }
 
-    private void Edit(CourseDto c)
+    private void Edit(CourseDto dto)
     {
-        _editId = c.Id;
-        _form = new CreateUpdateCourseDto { Name = c.Name, Code = c.Code, Credit = c.Credit, TeacherId = c.TeacherId };
+        _editId = dto.Id;
+        _formError = string.Empty;
+        _form = new CreateUpdateCourseVm
+        {
+            Code = dto.Code,
+            Name = dto.Name,
+            Credit = dto.Credit ?? 0,     // int? -> int
+            TeacherId = dto.TeacherId     // Guid (non-nullable)
+        };
         _showModal = true;
     }
 
-    private async Task Save()
+    private async Task SaveAsync()
     {
-        if (_form.TeacherId == Guid.Empty) return; // basit guard
+        _busy = true;
+        _formError = string.Empty;
 
-        if (_editId == null) await CoursesApp.CreateAsync(_form);
-        else await CoursesApp.UpdateAsync(_editId.Value, _form);
+        // Teacher zorunlu (DTO Guid - non-nullable)
+        if (_form.TeacherId == Guid.Empty)
+        {
+            _formError = "Please select a teacher.";
+            _busy = false; return;
+        }
 
-        _showModal = false;
-        await LoadAsync();
-    }
+        try
+        {
+            // VM -> DTO map (TeacherId doğrudan Guid)
+            var dto = new CreateUpdateCourseDto
+            {
+                Code = _form.Code,
+                Name = _form.Name,
+                Credit = _form.Credit,
+                TeacherId = _form.TeacherId
+            };
 
-    private async Task Delete(Guid id)
-    {
-        await CoursesApp.DeleteAsync(id);
-        await LoadAsync();
+            if (_editId is null)
+                await CoursesApp.CreateAsync(dto);
+            else
+                await CoursesApp.UpdateAsync(_editId.Value, dto);
+
+            _showModal = false;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _formError = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 
     private void CloseModal() => _showModal = false;
+
+    private void SortBy(string field)
+    {
+        if (_sort == field) _sortAsc = !_sortAsc;
+        else { _sort = field; _sortAsc = true; }
+        _ = LoadAsync();
+    }
+
+    private MarkupString SortGlyph(string field)
+    {
+        if (_sort != field) return (MarkupString)string.Empty;
+        var glyph = _sortAsc ? "▲" : "▼";
+        return (MarkupString)$"<span class='ms-1'>{glyph}</span>";
+    }
+
+    private void PrevPage()
+    {
+        if (_pageIndex == 0) return;
+        _pageIndex--;
+        _ = LoadAsync();
+    }
+
+    private void NextPage()
+    {
+        if (((long)_pageIndex + 1L) * _pageSize >= _totalCount) return;
+        _pageIndex++;
+        _ = LoadAsync();
+    }
+
+    private void ConfirmDelete(Guid id)
+    {
+        _pendingDeleteId = id;
+        _showDeleteConfirm = true;
+    }
+
+    private async Task DeleteAsync()
+    {
+        _busy = true;
+        await CoursesApp.DeleteAsync(_pendingDeleteId);
+        _busy = false;
+        _showDeleteConfirm = false;
+        await LoadAsync();
+    }
+
+    // ---------- ViewModel ----------
+    private class CreateUpdateCourseVm
+    {
+        public string? Code { get; set; }
+        public string? Name { get; set; }
+        public int Credit { get; set; }
+        public Guid TeacherId { get; set; } // Guid.Empty => seçilmedi
+    }
 }

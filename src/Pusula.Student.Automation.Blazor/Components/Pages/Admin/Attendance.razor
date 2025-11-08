@@ -1,71 +1,73 @@
 ﻿@page "/admin/attendance"
-@using Volo.Abp.Application.Dtos
-@using Microsoft.AspNetCore.Components.Forms
-@using Pusula.Student.Automation.Students
 @using Pusula.Student.Automation.Courses
 @using Pusula.Student.Automation.Enrollments
-@using Pusula.Student.Automation.Attendances
-@inject IStudentAppService StudentsApp
+@using Pusula.Student.Automation.Students
+@using Volo.Abp.Application.Dtos
 @inject ICourseAppService CoursesApp
 @inject IEnrollmentAppService EnrollmentsApp
-@inject IAttendanceAppService AttendanceApp
+@inject IStudentAppService StudentsApp
 
-<h3>Attendance</h3>
+<h3 class="mb-3">Attendance</h3>
 
-<div class="row g-2 mb-3">
-    <div class="col-md-4">
+<div class="row g-3 mb-3">
+    <div class="col-md-6">
         <label class="form-label">Course</label>
-        <select class="form-select"
-                @bind="_selectedCourseId"
-                @bind:after="OnCourseChanged">
-            <option value="@Guid.Empty">-- select course --</option>
+        <InputSelect class="form-select" @bind-Value="_selectedCourseId" @onchange="OnCourseChanged">
+            <option value="@Guid.Empty">— Select a course —</option> @* FIX *@
             @foreach (var c in _courses)
             {
                 <option value="@c.Id">@c.Code - @c.Name</option>
             }
-        </select>
+        </InputSelect>
     </div>
     <div class="col-md-3">
         <label class="form-label">Date</label>
-        <InputDate @bind-Value="_selectedDate" class="form-control" />
+        <InputDate class="form-control" @bind-Value="_date" />
     </div>
-    <div class="col-md-2 d-flex align-items-end">
-        <button class="btn btn-primary w-100" @onclick="LoadDataAsync">Load</button>
+    <div class="col-md-3 d-flex align-items-end">
+        <button class="btn btn-outline-primary w-100" @onclick="LoadGridAsync" disabled="@(_selectedCourseId == Guid.Empty)">Load</button>
     </div>
 </div>
 
-@if (_selectedCourseId == Guid.Empty)
+@if (!string.IsNullOrWhiteSpace(_error))
 {
-    <p class="text-muted">Please select a course.</p>
+    <div class="alert alert-danger">@_error</div>
 }
-else if (_loading)
+
+@if (_loading)
 {
     <p>Loading...</p>
 }
+else if (_selectedCourseId == Guid.Empty)
+{
+    <p class="text-muted">Please select a course.</p>
+}
+else if (_rows.Count == 0)
+{
+    <div class="alert alert-info">No enrollments for this course.</div>
+}
 else
 {
-    <table class="table table-striped">
+    <div class="d-flex gap-2 mb-2">
+        <button class="btn btn-sm btn-success" @onclick="CheckAll">Mark all present</button>
+        <button class="btn btn-sm btn-secondary" @onclick="UncheckAll">Clear all</button>
+        <button class="btn btn-sm btn-primary ms-auto" disabled title="Backend wiring pending">Save</button>
+    </div>
+
+    <table class="table table-striped align-middle">
         <thead>
             <tr>
                 <th>Student</th>
-                <th>Present</th>
-                <th style="width:160px;"></th>
+                <th style="width:140px;">Present</th>
             </tr>
         </thead>
         <tbody>
-            @foreach (var row in _rows)
+            @foreach (var r in _rows)
             {
                 <tr>
-                    <td>@row.StudentName</td>
+                    <td>@StudentLabel(r.StudentId)</td>
                     <td>
-                        <input type="checkbox" class="form-check-input" @bind="row.IsPresent" />
-                    </td>
-                    <td>
-                        <button class="btn btn-sm btn-primary me-2" @onclick="() => Save(row)">Save</button>
-                        @if (row.AttendanceId != null)
-                        {
-                            <button class="btn btn-sm btn-outline-danger" @onclick="() => Delete(row)">Delete</button>
-                        }
+                        <input class="form-check-input" type="checkbox" @bind="r.Present" />
                     </td>
                 </tr>
             }
@@ -74,99 +76,103 @@ else
 }
 
 @code {
-    private bool _loading = true;
-    private List<StudentDto> _students = new();
     private List<CourseDto> _courses = new();
-    private List<EnrollmentDto> _enrollments = new();
-    private List<AttendanceDto> _attendance = new();
+    private Guid _selectedCourseId = Guid.Empty;        // FIX: default Empty
 
-    private Guid _selectedCourseId = Guid.Empty;
-    private DateTime? _selectedDate = DateTime.UtcNow.Date;
+    private DateTime _date = DateTime.Today;
+    private bool _loading;
+    private string _error = string.Empty;
 
-    private List<Row> _rows = new();
+    private List<RowVm> _rows = new();
+
+    private List<StudentDto> _students = new();
 
     protected override async Task OnInitializedAsync()
     {
-        var sl = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
-        _students = sl.Items.ToList();
-
-        var cl = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 1000 });
-        _courses = cl.Items.ToList();
-
-        await LoadDataAsync();
+        await LoadCoursesAsync();
+        await LoadStudentsAsync();
     }
 
-    private async Task OnCourseChanged() => await LoadDataAsync();
-
-    private async Task LoadDataAsync()
+    private async Task LoadCoursesAsync()
     {
-        if (_selectedCourseId == Guid.Empty) { _rows.Clear(); return; }
-
-        _loading = true;
-
-        var el = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 2000 });
-        _enrollments = el.Items.Where(e => e.CourseId == _selectedCourseId).ToList();
-
-        var al = await AttendanceApp.GetListAsync(new PagedAndSortedResultRequestDto { MaxResultCount = 5000 });
-        var theDate = (_selectedDate ?? DateTime.UtcNow).Date;
-        _attendance = al.Items.Where(a => a.Date.Date == theDate).ToList();
-
-        _rows = _enrollments.Select(e =>
+        var list = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto
         {
-            var s = _students.FirstOrDefault(x => x.Id == e.StudentId);
-            var a = _attendance.FirstOrDefault(x => x.EnrollmentId == e.Id);
+            MaxResultCount = 1000,
+            Sorting = nameof(CourseDto.Code) + " ASC"
+        });
+        _courses = list.Items.ToList();
+    }
 
-            return new Row
+    private async Task LoadStudentsAsync()
+    {
+        var list = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+        {
+            MaxResultCount = 5000,
+            Sorting = nameof(StudentDto.FirstName) + " ASC"
+        });
+        _students = list.Items.ToList();
+    }
+
+    private string StudentLabel(Guid id)
+    {
+        var s = _students.FirstOrDefault(x => x.Id == id);
+        if (s is null) return "—";
+        var no = string.IsNullOrWhiteSpace(s.StudentNo) ? "" : $" [{s.StudentNo}]";
+        return $"{s.FirstName} {s.LastName}{no}";
+    }
+
+    private async Task OnCourseChanged(ChangeEventArgs _)
+    {
+        _error = string.Empty;
+        _rows.Clear();
+
+        if (_selectedCourseId == Guid.Empty)
+        {
+            StateHasChanged();
+            return;
+        }
+        await LoadGridAsync();
+    }
+
+    private async Task LoadGridAsync()
+    {
+        try
+        {
+            _loading = true;
+
+            var enrolls = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 5000
+            });
+
+            var courseEnrolls = enrolls.Items
+                .Where(e => e.CourseId == _selectedCourseId)
+                .ToList();
+
+            _rows = courseEnrolls.Select(e => new RowVm
             {
                 EnrollmentId = e.Id,
-                AttendanceId = a?.Id,
-                StudentName = s is null ? e.StudentId.ToString() : $"{s.StudentNo} - {s.FirstName} {s.LastName}",
-                IsPresent = a?.IsPresent ?? false
-            };
-        }).ToList();
-
-        _loading = false;
-    }
-
-    private async Task Save(Row row)
-    {
-        var date = (_selectedDate ?? DateTime.UtcNow).Date;
-
-        if (row.AttendanceId == null)
-        {
-            await AttendanceApp.CreateAsync(new CreateUpdateAttendanceDto
-            {
-                EnrollmentId = row.EnrollmentId,
-                Date = date,
-                IsPresent = row.IsPresent
-            });
+                StudentId = e.StudentId,
+                Present = false
+            }).ToList();
         }
-        else
+        catch (Exception ex)
         {
-            await AttendanceApp.UpdateAsync(row.AttendanceId.Value, new CreateUpdateAttendanceDto
-            {
-                EnrollmentId = row.EnrollmentId,
-                Date = date,
-                IsPresent = row.IsPresent
-            });
+            _error = ex.Message;
         }
-
-        await LoadDataAsync();
+        finally
+        {
+            _loading = false;
+        }
     }
 
-    private async Task Delete(Row row)
-    {
-        if (row.AttendanceId != null)
-            await AttendanceApp.DeleteAsync(row.AttendanceId.Value);
+    private void CheckAll() => _rows.ForEach(r => r.Present = true);
+    private void UncheckAll() => _rows.ForEach(r => r.Present = false);
 
-        await LoadDataAsync();
-    }
-
-    private class Row
+    private class RowVm
     {
         public Guid EnrollmentId { get; set; }
-        public Guid? AttendanceId { get; set; }
-        public string StudentName { get; set; } = "";
-        public bool IsPresent { get; set; }
+        public Guid StudentId { get; set; }
+        public bool Present { get; set; }
     }
 }

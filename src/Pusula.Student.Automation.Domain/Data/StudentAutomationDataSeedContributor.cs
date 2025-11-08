@@ -37,6 +37,14 @@ namespace Pusula.Student.Automation.Data
         [UnitOfWork]
         public async Task SeedAsync(DataSeedContext context)
         {
+            // … SeedAsync içinde en başa ekle
+            var existingAdminByName = await _userManager.FindByNameAsync("admin");
+            if (existingAdminByName != null)
+            {
+                // Bu sınıf admin üretmeyecek.
+                return;
+            }
+
             using (_currentTenant.Change(context?.TenantId))
             {
                 // 1️⃣ Rolleri oluştur

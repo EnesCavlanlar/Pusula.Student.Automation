@@ -124,7 +124,8 @@ public class AutomationDbContext :
             b.Property(x => x.Credit);
 
             // Unique Code per tenant
-            b.HasIndex(nameof(CourseEntity.TenantId), nameof(CourseEntity.Code)).IsUnique();
+            // Unique Code (single-tenant / no TenantId)
+            b.HasIndex(x => x.Code).IsUnique();
 
             // Relation: Course -> Teacher (required)
             b.HasOne<TeacherEntity>()
