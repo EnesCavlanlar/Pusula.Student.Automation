@@ -1,15 +1,18 @@
 ﻿using Pusula.Student.Automation.Courses;
 using Pusula.Student.Automation.Permissions;
 using Pusula.Student.Automation.Teachers;
+using Pusula.Student.Automation.Caching;              // ⬅ eklendi
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Caching.Distributed;       // ⬅ eklendi
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Authorization;
+using Volo.Abp.Caching;                               // ⬅ eklendi
 using Volo.Abp.Domain.Repositories;
 
 // alias’lar
@@ -31,17 +34,22 @@ namespace Pusula.Student.Automation.Enrollments
         private readonly IRepository<Teacher, Guid> _teacherRepository;
         private readonly IRepository<Course, Guid> _courseRepository;
         private readonly IRepository<StudentEntity, Guid> _studentRepository;
+        private readonly IDistributedCache<CourseStudentsCacheItem> _courseStudentsCache; // ⬅ yeni
+
+        private const int CourseStudentsCacheSeconds = 60;
 
         public EnrollmentAppService(
             IRepository<EnrollmentEntity, Guid> repository,
             IRepository<Teacher, Guid> teacherRepository,
             IRepository<Course, Guid> courseRepository,
-            IRepository<StudentEntity, Guid> studentRepository
+            IRepository<StudentEntity, Guid> studentRepository,
+            IDistributedCache<CourseStudentsCacheItem> courseStudentsCache     // ⬅ yeni
         ) : base(repository)
         {
             _teacherRepository = teacherRepository;
             _courseRepository = courseRepository;
             _studentRepository = studentRepository;
+            _courseStudentsCache = courseStudentsCache;
 
             GetPolicyName = AutomationPermissions.Enrollments.Default;
             GetListPolicyName = AutomationPermissions.Enrollments.Default;
@@ -52,6 +60,9 @@ namespace Pusula.Student.Automation.Enrollments
 
         private bool IsTeacherUser => CurrentUser?.Roles?.Contains("Teacher") == true;
         private bool IsStudentUser => CurrentUser?.Roles?.Contains("Student") == true;
+
+        private static string BuildCourseStudentsCacheKey(Guid courseId)
+            => $"course:{courseId}:students";
 
         private async Task<Guid> GetCurrentTeacherIdOrThrowAsync()
         {
@@ -182,6 +193,13 @@ namespace Pusula.Student.Automation.Enrollments
             );
 
             await Repository.InsertAsync(entity, autoSave: true);
+
+            // ⬅ dersin öğrenci listesi değişti, cache’i sil
+            if (input.CourseId != Guid.Empty)
+            {
+                await _courseStudentsCache.RemoveAsync(BuildCourseStudentsCacheKey(input.CourseId));
+            }
+
             return await MapToGetOutputDtoAsync(entity);
         }
 
@@ -201,6 +219,9 @@ namespace Pusula.Student.Automation.Enrollments
             if (IsStudentUser)
                 throw new AbpAuthorizationException("Students cannot update enrollments.");
 
+            // mevcut courseId'yi sakla ki cache'i silebilelim
+            var oldCourseId = entity.CourseId;
+
             void SetProp<TVal>(object target, string name, TVal value)
             {
                 var p = target.GetType().GetProperty(name,
@@ -216,6 +237,17 @@ namespace Pusula.Student.Automation.Enrollments
             SetProp(entity, "EnrollmentDate", input.EnrollmentDate ?? entity.EnrollmentDate);
 
             await Repository.UpdateAsync(entity, autoSave: true);
+
+            // ⬅ eski ders için de yeni ders için de cache'i sil
+            if (oldCourseId != Guid.Empty)
+            {
+                await _courseStudentsCache.RemoveAsync(BuildCourseStudentsCacheKey(oldCourseId));
+            }
+            if (input.CourseId != Guid.Empty && input.CourseId != oldCourseId)
+            {
+                await _courseStudentsCache.RemoveAsync(BuildCourseStudentsCacheKey(input.CourseId));
+            }
+
             return await MapToGetOutputDtoAsync(entity);
         }
 
@@ -229,9 +261,15 @@ namespace Pusula.Student.Automation.Enrollments
                 throw new AbpAuthorizationException("Students cannot delete enrollments.");
 
             await base.DeleteAsync(id);
+
+            // ⬅ silinen enrollment'in bağlı olduğu dersin cache'i de silinsin
+            if (entity.CourseId != Guid.Empty)
+            {
+                await _courseStudentsCache.RemoveAsync(BuildCourseStudentsCacheKey(entity.CourseId));
+            }
         }
 
-        // NEW
+        // NEW - derse kayıtlı öğrenciler (CACHE'LI)
         public async Task<List<CourseStudentDto>> GetStudentsByCourseAsync(Guid courseId)
         {
             // rol kontrolü (öğretmense kendi dersini görsün)
@@ -242,13 +280,43 @@ namespace Pusula.Student.Automation.Enrollments
                     throw new AbpAuthorizationException("You can list students only for your own courses.");
             }
 
-            var enrollments = await Repository.GetListAsync(e => e.CourseId == courseId);
+            var cacheKey = BuildCourseStudentsCacheKey(courseId);
 
-            var studentIds = enrollments.Select(e => e.StudentId).Distinct().ToList();
-            var students = await _studentRepository.GetListAsync(s => studentIds.Contains(s.Id));
+            // 1) önce redis'e bak
+            var cached = await _courseStudentsCache.GetAsync(cacheKey);
+            if (cached != null && cached.StudentIds != null && cached.StudentIds.Count > 0)
+            {
+                var studentIds = cached.StudentIds;
 
-            var result = (from e in enrollments
-                          join s in students on e.StudentId equals s.Id
+                // enrollment'ları ve öğrenci detaylarını yine de DB'den çekmemiz lazım
+                var enrollments = await Repository.GetListAsync(e => e.CourseId == courseId && studentIds.Contains(e.StudentId));
+                var students = await _studentRepository.GetListAsync(s => studentIds.Contains(s.Id));
+
+                var fromCacheResult = (from e in enrollments
+                                       join s in students on e.StudentId equals s.Id
+                                       select new CourseStudentDto
+                                       {
+                                           Id = e.Id,
+                                           EnrollmentId = e.Id,
+                                           StudentId = s.Id,
+                                           StudentName = $"{s.FirstName} {s.LastName}",
+                                           StudentNo = s.StudentNo,
+                                           CourseId = courseId
+                                       })
+                                      .OrderBy(x => x.StudentName)
+                                      .ToList();
+
+                return fromCacheResult;
+            }
+
+            // 2) cache yoksa eski mantıkla DB'den çek
+            var enrollmentsDb = await Repository.GetListAsync(e => e.CourseId == courseId);
+
+            var studentIdsDb = enrollmentsDb.Select(e => e.StudentId).Distinct().ToList();
+            var studentsDb = await _studentRepository.GetListAsync(s => studentIdsDb.Contains(s.Id));
+
+            var result = (from e in enrollmentsDb
+                          join s in studentsDb on e.StudentId equals s.Id
                           select new CourseStudentDto
                           {
                               Id = e.Id,
@@ -260,6 +328,22 @@ namespace Pusula.Student.Automation.Enrollments
                           })
                          .OrderBy(x => x.StudentName)
                          .ToList();
+
+            // 3) şimdi bu course için öğrenci id'lerini cache'e yaz
+            var toCache = new CourseStudentsCacheItem
+            {
+                CourseId = courseId,
+                StudentIds = studentIdsDb
+            };
+
+            await _courseStudentsCache.SetAsync(
+                cacheKey,
+                toCache,
+                new DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(CourseStudentsCacheSeconds)
+                }
+            );
 
             return result;
         }

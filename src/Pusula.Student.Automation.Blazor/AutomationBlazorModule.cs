@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Security.Cryptography.X509Certificates;
 using Blazorise.Bootstrap5;
@@ -51,6 +51,8 @@ using Volo.Abp.UI.Navigation;
 using Volo.Abp.UI.Navigation.Urls;
 using Volo.Abp.VirtualFileSystem;
 using Volo.Abp.Studio.Client.AspNetCore;
+using Volo.Abp.Caching;
+using Volo.Abp.Caching.StackExchangeRedis;
 
 namespace Pusula.Student.Automation.Blazor;
 
@@ -68,8 +70,9 @@ namespace Pusula.Student.Automation.Blazor;
     typeof(AbpAspNetCoreMvcUiLeptonXLiteThemeModule),
     typeof(AbpAspNetCoreSerilogModule),
     typeof(AbpFeatureManagementBlazorServerModule),
-    typeof(AbpSettingManagementBlazorServerModule)
-   )]
+    typeof(AbpSettingManagementBlazorServerModule),
+    typeof(AbpCachingStackExchangeRedisModule) // ✅ Redis modülü eklendi
+)]
 public class AutomationBlazorModule : AbpModule
 {
     public override void PreConfigureServices(ServiceConfigurationContext context)
@@ -140,7 +143,7 @@ public class AutomationBlazorModule : AbpModule
             {
                 options.DisableTransportSecurityRequirement = true;
             });
-            
+
             Configure<ForwardedHeadersOptions>(options =>
             {
                 options.ForwardedHeaders = ForwardedHeaders.XForwardedProto;
@@ -158,8 +161,14 @@ public class AutomationBlazorModule : AbpModule
         ConfigureBlazorise(context);
         ConfigureRouter(context);
         ConfigureMenu(context);
+
+        // ✅ Redis yapılandırması
+        Configure<AbpDistributedCacheOptions>(options =>
+        {
+            options.KeyPrefix = "Automation:";
+        });
     }
-    
+
     private void ConfigureAuthentication(ServiceConfigurationContext context)
     {
         context.Services.ForwardIdentityAuthenticationForBearer(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
@@ -242,7 +251,6 @@ public class AutomationBlazorModule : AbpModule
         );
     }
 
-
     private void ConfigureBlazorise(ServiceConfigurationContext context)
     {
         context.Services
@@ -257,7 +265,6 @@ public class AutomationBlazorModule : AbpModule
             options.MenuContributors.Add(new AutomationMenuContributor());
         });
     }
-    
 
     private void ConfigureRouter(ServiceConfigurationContext context)
     {

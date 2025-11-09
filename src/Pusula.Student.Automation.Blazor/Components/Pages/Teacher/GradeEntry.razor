@@ -50,6 +50,7 @@ else
             <tr>
                 <th style="width:300px;">Öğrenci</th>
                 <th style="width:120px;">Not (0–100)</th>
+                <th style="width:200px;">Açıklama</th>
                 <th style="width:140px;"></th>
             </tr>
         </thead>
@@ -57,9 +58,12 @@ else
             @foreach (var r in _rows)
             {
                 <tr>
-                    <td>@StudentLabel(r.StudentId)</td>
+                    <td>@r.StudentName (@r.StudentNo)</td>
                     <td>
                         <InputNumber class="form-control" @bind-Value="r.Score" />
+                    </td>
+                    <td>
+                        <InputText class="form-control" @bind-Value="r.Note" />
                     </td>
                     <td>
                         <button class="btn btn-sm btn-primary" @onclick="() => SaveRowAsync(r)">Kaydet</button>
@@ -78,35 +82,19 @@ else
     private bool _loading;
     private string _error = string.Empty;
 
-    private List<StudentDto> _students = new();
+    // öğrencileri ekranda label olarak göstermek için
     private List<GradeRowVm> _rows = new();
 
     protected override async Task OnInitializedAsync()
     {
+        // öğretmenin kendi dersleri (Redis'li)
         await LoadMyCoursesAsync();
-        await LoadStudentsAsync();
     }
 
     private async Task LoadMyCoursesAsync()
     {
         var list = await CoursesApp.GetMyCoursesAsync();
         _courses = list;
-    }
-
-    private async Task LoadStudentsAsync()
-    {
-        var list = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto
-        {
-            MaxResultCount = 1000,
-            Sorting = nameof(StudentDto.FirstName) + " ASC"
-        });
-        _students = list.Items.ToList();
-    }
-
-    private string StudentLabel(Guid id)
-    {
-        var s = _students.FirstOrDefault(x => x.Id == id);
-        return s == null ? "—" : $"{s.FirstName} {s.LastName}";
     }
 
     private async Task OnCourseChanged(ChangeEventArgs _)
@@ -129,34 +117,30 @@ else
         {
             _loading = true;
 
-            var enrollments = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto
-            {
-                MaxResultCount = 1000
-            });
+            // 1) derse kayıtlı öğrencileri al (bu bizim EnrollmentAppService'e eklediğimiz cache'li metot)
+            var courseStudents = await EnrollmentsApp.GetStudentsByCourseAsync(_selectedCourseId);
 
-            var courseEnrolls = enrollments.Items
-                .Where(e => e.CourseId == _selectedCourseId)
-                .ToList();
+            // 2) bu dersin mevcut notlarını al (service içinde öğretmenlik kontrolü var)
+            var courseGrades = await GradesApp.GetListByCourseAsync(_selectedCourseId);
+            var gradeDict = courseGrades.ToDictionary(g => g.EnrollmentId, g => g);
 
-            // mevcut notlar
-            var grades = await GradesApp.GetListAsync(new PagedAndSortedResultRequestDto
-            {
-                MaxResultCount = 1000
-            });
-
-            var gradeDict = grades.Items.ToDictionary(g => g.EnrollmentId, g => g);
-
-            _rows = courseEnrolls.Select(e =>
-            {
-                gradeDict.TryGetValue(e.Id, out var g);
-                return new GradeRowVm
+            // 3) ekranda göstereceğimiz satırları hazırla
+            _rows = courseStudents
+                .Select(cs =>
                 {
-                    EnrollmentId = e.Id,
-                    StudentId = e.StudentId,
-                    Score = g?.Score ?? 0,
-                    Note = g?.Note
-                };
-            }).ToList();
+                    gradeDict.TryGetValue(cs.EnrollmentId, out var g);
+                    return new GradeRowVm
+                    {
+                        EnrollmentId = cs.EnrollmentId,
+                        StudentId = cs.StudentId,
+                        StudentName = cs.StudentName,
+                        StudentNo = cs.StudentNo,
+                        Score = g?.Score ?? 0,
+                        Note = g?.Note
+                    };
+                })
+                .OrderBy(x => x.StudentName)
+                .ToList();
         }
         catch (Exception ex)
         {
@@ -168,7 +152,11 @@ else
         }
     }
 
-    private void ResetRow(GradeRowVm r) => r.Score = 0;
+    private void ResetRow(GradeRowVm r)
+    {
+        r.Score = 0;
+        r.Note = string.Empty;
+    }
 
     private async Task SaveRowAsync(GradeRowVm r)
     {
@@ -180,6 +168,8 @@ else
                 Score = r.Score,
                 Note = r.Note
             });
+
+            // backend tarafında cache'ler zaten siliniyor
         }
         catch (Exception ex)
         {
@@ -191,6 +181,8 @@ else
     {
         public Guid EnrollmentId { get; set; }
         public Guid StudentId { get; set; }
+        public string StudentName { get; set; } = string.Empty;
+        public string StudentNo { get; set; } = string.Empty;
         public int Score { get; set; }
         public string? Note { get; set; }
     }

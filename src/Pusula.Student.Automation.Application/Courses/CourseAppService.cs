@@ -1,13 +1,16 @@
 ﻿using Pusula.Student.Automation.Permissions;
 using Pusula.Student.Automation.Teachers;
+using Pusula.Student.Automation.Caching;           // cache item
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Caching.Distributed;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Authorization;
+using Volo.Abp.Caching;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Users;
 // Alias
@@ -25,13 +28,17 @@ namespace Pusula.Student.Automation.Courses
         ICourseAppService
     {
         private readonly IRepository<Teacher, Guid> _teacherRepository;
+        private readonly IDistributedCache<TeacherCoursesCacheItem> _teacherCoursesCache;
+        private const int TeacherCoursesCacheSeconds = 60;
 
         public CourseAppService(
             IRepository<CourseEntity, Guid> repository,
-            IRepository<Teacher, Guid> teacherRepository
+            IRepository<Teacher, Guid> teacherRepository,
+            IDistributedCache<TeacherCoursesCacheItem> teacherCoursesCache
         ) : base(repository)
         {
             _teacherRepository = teacherRepository;
+            _teacherCoursesCache = teacherCoursesCache;
 
             GetPolicyName = AutomationPermissions.Courses.Default;
             GetListPolicyName = AutomationPermissions.Courses.Default;
@@ -82,6 +89,11 @@ namespace Pusula.Student.Automation.Courses
                 throw new AbpAuthorizationException("You are not allowed to access this course.");
         }
 
+        private static string BuildTeacherCoursesCacheKey(Guid teacherId)
+        {
+            return $"teacher:{teacherId}:courses";
+        }
+
         // ------------------------------
         // Read operations
         // ------------------------------
@@ -124,7 +136,16 @@ namespace Pusula.Student.Automation.Courses
                 input.TeacherId = currentTeacherId; // kendi adına ders açar
             }
 
-            return await base.CreateAsync(input);
+            var created = await base.CreateAsync(input);
+
+            // öğretmen ders açtıysa, kendi cache'i silinsin
+            if (IsTeacherUser)
+            {
+                var currentTeacherId = await GetCurrentTeacherIdOrThrowAsync();
+                await _teacherCoursesCache.RemoveAsync(BuildTeacherCoursesCacheKey(currentTeacherId));
+            }
+
+            return created;
         }
 
         public override async Task<CourseDto> UpdateAsync(Guid id, CreateUpdateCourseDto input)
@@ -138,30 +159,80 @@ namespace Pusula.Student.Automation.Courses
                 input.TeacherId = currentTeacherId; // başka öğretmene devri engelle
             }
 
-            return await base.UpdateAsync(id, input);
+            var updated = await base.UpdateAsync(id, input);
+
+            // ders güncellendiyse ilgili öğretmenin cache'ini sil
+            if (IsTeacherUser)
+            {
+                var currentTeacherId = await GetCurrentTeacherIdOrThrowAsync();
+                await _teacherCoursesCache.RemoveAsync(BuildTeacherCoursesCacheKey(currentTeacherId));
+            }
+
+            return updated;
         }
 
         public override async Task DeleteAsync(Guid id)
         {
             var entity = await Repository.GetAsync(id);
             await EnsureOwnerAsync(entity);
-            await base.DeleteAsync(id);
-        }
 
-        // ------------------------------
-        // NEW: öğretmenin kendi dersleri
-        // ------------------------------
-        public async Task<List<CourseDto>> GetMyCoursesAsync()
-        {
-            // öğretmense sadece kendi dersleri
+            await base.DeleteAsync(id);
+
+            // ders silindiyse ilgili öğretmenin cache'i de silinsin
             if (IsTeacherUser)
             {
                 var currentTeacherId = await GetCurrentTeacherIdOrThrowAsync();
-                var list = await Repository.GetListAsync(c => c.TeacherId == currentTeacherId);
-                return ObjectMapper.Map<List<CourseEntity>, List<CourseDto>>(list);
+                await _teacherCoursesCache.RemoveAsync(BuildTeacherCoursesCacheKey(currentTeacherId));
+            }
+        }
+
+        // ------------------------------
+        // NEW: öğretmenin kendi dersleri (Redis cache'li)
+        // ------------------------------
+        public async Task<List<CourseDto>> GetMyCoursesAsync()
+        {
+            if (IsTeacherUser)
+            {
+                var currentTeacherId = await GetCurrentTeacherIdOrThrowAsync();
+                var cacheKey = BuildTeacherCoursesCacheKey(currentTeacherId);
+
+                // 1) önce redis'ten dene
+                var cached = await _teacherCoursesCache.GetAsync(cacheKey);
+                if (cached != null && cached.CourseIds != null && cached.CourseIds.Count > 0)
+                {
+                    var ids = cached.CourseIds;
+
+                    var queryable = await Repository.GetQueryableAsync();
+                    var filtered = queryable.Where(c => ids.Contains(c.Id));
+
+                    var list = await AsyncExecuter.ToListAsync(filtered);
+                    return ObjectMapper.Map<List<CourseEntity>, List<CourseDto>>(list);
+                }
+
+                // 2) cache yoksa db'den al
+                var dbList = await Repository.GetListAsync(c => c.TeacherId == currentTeacherId);
+                var dtoList = ObjectMapper.Map<List<CourseEntity>, List<CourseDto>>(dbList);
+
+                // 3) id'leri cache'e koy
+                var toCache = new TeacherCoursesCacheItem
+                {
+                    TeacherId = currentTeacherId,
+                    CourseIds = dtoList.Select(d => d.Id).ToList()
+                };
+
+                await _teacherCoursesCache.SetAsync(
+                    cacheKey,
+                    toCache,
+                    new DistributedCacheEntryOptions
+                    {
+                        AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(TeacherCoursesCacheSeconds)
+                    }
+                );
+
+                return dtoList;
             }
 
-            // admin / başka rol ise hepsini dönebilir
+            // admin / diğer roller
             var all = await Repository.GetListAsync();
             return ObjectMapper.Map<List<CourseEntity>, List<CourseDto>>(all);
         }
