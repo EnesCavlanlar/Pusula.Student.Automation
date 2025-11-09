@@ -2,13 +2,16 @@
 @using Pusula.Student.Automation.Permissions
 @attribute [Authorize(AutomationPermissions.Enrollments.Default)]
 
+@using Microsoft.AspNetCore.Authorization
 @using Pusula.Student.Automation.Courses
 @using Pusula.Student.Automation.Enrollments
-@using Pusula.Student.Automation.Enrollments.Dtos
+@using Pusula.Student.Automation.Students
 @using Volo.Abp.Application.Dtos
 
 @inject ICourseAppService CoursesApp
 @inject IEnrollmentAppService EnrollmentsApp
+@inject IStudentAppService StudentsApp
+@inject IAuthorizationService AuthorizationService
 
 <h3 class="mb-3">Derse Kayıtlı Öğrencilerim</h3>
 
@@ -32,45 +35,91 @@
 
 @if (_loading)
 {
-    <p>Yükleniyor...</p>
+    <p>Yükleniyor…</p>
 }
 else if (_selectedCourseId == Guid.Empty)
 {
-    <p class="text-muted">Bir ders seçtiğinizde liste gelecektir.</p>
-}
-else if (_rows.Count == 0)
-{
-    <div class="alert alert-info">Bu derse kayıtlı öğrenci yok.</div>
+    <p class="text-muted">Lütfen üstten bir ders seçin.</p>
 }
 else
 {
-    <table class="table table-striped align-middle">
-        <thead>
-            <tr>
-                <th style="width:150px;">Öğrenci No</th>
-                <th>Ad Soyad</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var r in _rows)
-            {
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Bu derse öğrenci ekle</h5>
+            <div class="row g-2 align-items-end">
+                <div class="col-md-6">
+                    <label class="form-label">Öğrenci</label>
+                    <InputSelect class="form-select" @bind-Value="_studentToAddId">
+                        <option value="@Guid.Empty">— Öğrenci seçin —</option>
+                        @foreach (var s in _students.OrderBy(x => x.FirstName).ThenBy(x => x.LastName))
+                        {
+                            <option value="@s.Id">@StudentLabel(s)</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-primary w-100" @onclick="AddStudentAsync"
+                            disabled="@(_studentToAddId == Guid.Empty || _adding)">
+                        @(_adding ? "Ekleniyor..." : "Ekle")
+                    </button>
+                </div>
+            </div>
+            <small class="text-muted d-block mt-2">
+                Not: Aynı öğrenci aynı derse bir daha eklenemez, zaten listede görünür.
+            </small>
+        </div>
+    </div>
+
+    @if (_rows.Count == 0)
+    {
+        <div class="alert alert-info">Bu derse kayıtlı öğrenci yok.</div>
+    }
+    else
+    {
+        <table class="table table-striped align-middle">
+            <thead>
                 <tr>
-                    <td>@r.StudentNo</td>
-                    <td>@r.FullName</td>
+                    <th style="width:160px;">Öğrenci No</th>
+                    <th>Ad Soyad</th>
+                    <th style="width:200px;">E-posta</th>
+                    <th style="width:160px;">Kayıt Tarihi</th>
+                    <th style="width:110px;"></th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                @foreach (var r in _rows)
+                {
+                    <tr>
+                        <td>@r.StudentNo</td>
+                        <td>@r.FullName</td>
+                        <td>@r.Email</td>
+                        <td>@r.EnrollmentDate.ToString("dd.MM.yyyy")</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-danger"
+                                    @onclick="() => DeleteEnrollmentAsync(r.EnrollmentId)"
+                                    disabled="@_deletingIds.Contains(r.EnrollmentId)">
+                                Sil
+                            </button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
 }
 
 @code {
     private bool _loading = true;
+    private bool _adding = false;
     private string _error = string.Empty;
 
     private List<CourseDto> _courses = new();
+    private List<StudentDto> _students = new();
     private Guid _selectedCourseId = Guid.Empty;
+    private Guid _studentToAddId = Guid.Empty;
 
     private List<RowVm> _rows = new();
+    private HashSet<Guid> _deletingIds = new(); // aynı anda iki kere silmeye basmasın
 
     protected override async Task OnInitializedAsync()
     {
@@ -78,13 +127,21 @@ else
         {
             _loading = true;
 
-            // öğretmen girişi olduğu için CourseApp zaten kendi derslerini filtreli dönecek
+            // dersler
             var cList = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto
             {
                 MaxResultCount = 1000,
                 Sorting = nameof(CourseDto.Code) + " ASC"
             });
             _courses = cList.Items.ToList();
+
+            // öğrenciler
+            var sList = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000,
+                Sorting = nameof(StudentDto.FirstName) + " ASC"
+            });
+            _students = sList.Items.ToList();
         }
         catch (Exception ex)
         {
@@ -94,6 +151,12 @@ else
         {
             _loading = false;
         }
+    }
+
+    private string StudentLabel(StudentDto s)
+    {
+        var no = string.IsNullOrWhiteSpace(s.StudentNo) ? "" : $" [{s.StudentNo}]";
+        return $"{s.FirstName} {s.LastName}{no}";
     }
 
     private async Task OnCourseChanged(ChangeEventArgs _)
@@ -116,14 +179,28 @@ else
         {
             _loading = true;
 
-            var students = await EnrollmentsApp.GetStudentsByCourseAsync(_selectedCourseId);
+            var enrollments = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000
+            });
 
-            _rows = students
-                .Select(s => new RowVm
+            var courseEnrolls = enrollments.Items
+                .Where(e => e.CourseId == _selectedCourseId)
+                .ToList();
+
+            _rows = courseEnrolls
+                .Select(e =>
                 {
-                    StudentId = s.StudentId,
-                    StudentNo = s.StudentNo ?? "",
-                    FullName = s.StudentName
+                    var s = _students.FirstOrDefault(x => x.Id == e.StudentId);
+                    return new RowVm
+                    {
+                        EnrollmentId = e.Id, // <-- silmek için lazım
+                        StudentId = e.StudentId,
+                        StudentNo = s?.StudentNo ?? "",
+                        FullName = s is null ? "—" : $"{s.FirstName} {s.LastName}",
+                        Email = s?.Email ?? "",
+                        EnrollmentDate = e.EnrollmentDate
+                    };
                 })
                 .OrderBy(r => r.FullName)
                 .ToList();
@@ -138,10 +215,71 @@ else
         }
     }
 
+    private async Task AddStudentAsync()
+    {
+        if (_selectedCourseId == Guid.Empty || _studentToAddId == Guid.Empty)
+            return;
+
+        _error = string.Empty;
+        _adding = true;
+        try
+        {
+            var already = _rows.Any(r => r.StudentId == _studentToAddId);
+            if (already)
+            {
+                _error = "Bu öğrenci zaten bu derse kayıtlı.";
+                return;
+            }
+
+            await EnrollmentsApp.CreateAsync(new CreateEnrollmentDto
+            {
+                StudentId = _studentToAddId,
+                CourseId = _selectedCourseId,
+                EnrollmentDate = DateTime.Now
+            });
+
+            await LoadStudentsOfCourseAsync();
+            _studentToAddId = Guid.Empty;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _adding = false;
+        }
+    }
+
+    private async Task DeleteEnrollmentAsync(Guid enrollmentId)
+    {
+        if (enrollmentId == Guid.Empty)
+            return;
+
+        _error = string.Empty;
+        _deletingIds.Add(enrollmentId);
+        try
+        {
+            await EnrollmentsApp.DeleteAsync(enrollmentId);
+            await LoadStudentsOfCourseAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _deletingIds.Remove(enrollmentId);
+        }
+    }
+
     private class RowVm
     {
+        public Guid EnrollmentId { get; set; }   // <-- yeni
         public Guid StudentId { get; set; }
         public string StudentNo { get; set; } = "";
         public string FullName { get; set; } = "";
+        public string Email { get; set; } = "";
+        public DateTime EnrollmentDate { get; set; }
     }
 }
