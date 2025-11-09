@@ -14,7 +14,7 @@ namespace Pusula.Student.Automation.Blazor.Menus
 {
     public class AutomationMenuContributor : IMenuContributor
     {
-        public async Task ConfigureMenuAsync(MenuConfigurationContext context)
+        public async Task ConfigureMenuAsync(MenuConfigurationContext context) 
         {
             if (context.Menu.Name != StandardMenus.Main)
                 return;
