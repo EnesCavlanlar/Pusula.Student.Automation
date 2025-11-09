@@ -1,0 +1,62 @@
+﻿@page "/teacher/my-courses"
+
+@using Pusula.Student.Automation.Courses
+@using Volo.Abp.Application.Dtos
+
+@inject ICourseAppService CoursesApp
+
+<h3 class="mb-3">My Courses</h3>
+
+@if (_loading)
+{
+    <p>Loading...</p>
+}
+else if (_courses.Count == 0)
+{
+    <div class="alert alert-info">You don't have any courses.</div>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th style="width:140px;">Code</th>
+                <th>Name</th>
+                <th style="width:120px;">Credit</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var c in _courses)
+            {
+                <tr>
+                    <td>@c.Code</td>
+                    <td>@c.Name</td>
+                    <td>@c.Credit</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool _loading;
+    private List<CourseDto> _courses = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+
+        var list = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto
+        {
+            MaxResultCount = 1000,
+            Sorting = nameof(CourseDto.Code) + " ASC"
+        });
+
+        // Şimdilik öğretmenin kendi derslerini filtrelemiyoruz,
+        // backend'de zaten "teacher" kullanıcıya göre filtreliyorsak bu liste
+        // otomatik küçülür. Etmiyorsak hepsi gelir – sorun değil.
+        _courses = list.Items.ToList();
+
+        _loading = false;
+    }
+}

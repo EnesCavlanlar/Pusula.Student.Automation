@@ -1,0 +1,174 @@
+﻿@page "/teacher/course-students"
+@using Pusula.Student.Automation.Permissions
+@attribute [Authorize(AutomationPermissions.Enrollments.Default)]
+
+@using Microsoft.AspNetCore.Authorization
+@using Pusula.Student.Automation.Courses
+@using Pusula.Student.Automation.Enrollments
+@using Pusula.Student.Automation.Students
+@using Volo.Abp.Application.Dtos
+
+@inject ICourseAppService CoursesApp
+@inject IEnrollmentAppService EnrollmentsApp
+@inject IStudentAppService StudentsApp
+@inject IAuthorizationService AuthorizationService
+
+<h3 class="mb-3">Course Students</h3>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-6">
+        <label class="form-label">Course</label>
+        <InputSelect class="form-select" @bind-Value="_selectedCourseId" @onchange="OnCourseChanged">
+            <option value="@Guid.Empty">— Select a course —</option>
+            @foreach (var c in _courses)
+            {
+                <option value="@c.Id">@c.Code - @c.Name</option>
+            }
+        </InputSelect>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (_loading)
+{
+    <p>Loading...</p>
+}
+else if (_selectedCourseId == Guid.Empty)
+{
+    <p class="text-muted">Please select a course.</p>
+}
+else if (_rows.Count == 0)
+{
+    <div class="alert alert-info">No students enrolled in this course.</div>
+}
+else
+{
+    <table class="table table-striped align-middle">
+        <thead>
+            <tr>
+                <th style="width:180px;">Student No</th>
+                <th>Name</th>
+                <th style="width:200px;">Email</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in _rows)
+            {
+                <tr>
+                    <td>@r.StudentNo</td>
+                    <td>@r.FullName</td>
+                    <td>@r.Email</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool _loading = true;
+    private string _error = string.Empty;
+
+    private List<CourseDto> _courses = new();
+    private List<StudentDto> _students = new();
+    private Guid _selectedCourseId = Guid.Empty;
+
+    private List<RowVm> _rows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _loading = true;
+
+            // dersler
+            var cList = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000,
+                Sorting = nameof(CourseDto.Code) + " ASC"
+            });
+            _courses = cList.Items.ToList();
+
+            // öğrenciler
+            var sList = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000,
+                Sorting = nameof(StudentDto.FirstName) + " ASC"
+            });
+            _students = sList.Items.ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task OnCourseChanged(ChangeEventArgs _)
+    {
+        _error = string.Empty;
+        _rows.Clear();
+
+        if (_selectedCourseId == Guid.Empty)
+        {
+            StateHasChanged();
+            return;
+        }
+
+        await LoadStudentsOfCourseAsync();
+    }
+
+    private async Task LoadStudentsOfCourseAsync()
+    {
+        try
+        {
+            _loading = true;
+
+            var enrollments = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000
+            });
+
+            var courseEnrolls = enrollments.Items
+                .Where(e => e.CourseId == _selectedCourseId)
+                .ToList();
+
+            _rows = courseEnrolls
+                .Select(e =>
+                {
+                    var s = _students.FirstOrDefault(x => x.Id == e.StudentId);
+                    return new RowVm
+                    {
+                        StudentId = e.StudentId,
+                        StudentNo = s?.StudentNo ?? "",
+                        FullName = s is null ? "—" : $"{s.FirstName} {s.LastName}",
+                        Email = s?.Email ?? ""
+                    };
+                })
+                .OrderBy(r => r.FullName)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private class RowVm
+    {
+        public Guid StudentId { get; set; }
+        public string StudentNo { get; set; } = "";
+        public string FullName { get; set; } = "";
+        public string Email { get; set; } = "";
+    }
+}

@@ -3,7 +3,6 @@
 @attribute [Authorize(AutomationPermissions.Enrollments.Default)]
 
 @using Microsoft.AspNetCore.Authorization
-@using Volo.Abp.Authorization                 @* IsGrantedAsync extension *@
 @using Pusula.Student.Automation.Enrollments
 @using Pusula.Student.Automation.Students
 @using Pusula.Student.Automation.Courses
@@ -192,35 +191,28 @@ else
 }
 
 @code {
-    // state
     private List<EnrollmentDto> _items = new();
     private long _totalCount;
     private bool _loading;
     private bool _busy;
 
-    // permissions
     private bool _canCreate, _canEdit, _canDelete;
 
-    // paging & sorting & search
     private int _pageIndex = 0;
     private int _pageSize = 10;
     private string? _sort = nameof(EnrollmentDto.StudentId);
     private bool _sortAsc = true;
     private string _search = string.Empty;
 
-    // form modal
     private bool _showModal;
     private Guid? _editId;
 
-    // Form VM
     private CreateUpdateEnrollmentVm _form = new();
     private string _formError = string.Empty;
 
-    // delete confirm
     private bool _showDeleteConfirm;
     private Guid _pendingDeleteId;
 
-    // lookups
     private List<StudentDto> _allStudents = new();
     private List<CourseDto> _allCourses = new();
 
@@ -242,7 +234,7 @@ else
     {
         var students = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto
         {
-            MaxResultCount = 2000,
+            MaxResultCount = 1000,
             SkipCount = 0,
             Sorting = nameof(StudentDto.FirstName) + " ASC"
         });
@@ -250,7 +242,7 @@ else
 
         var courses = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto
         {
-            MaxResultCount = 2000,
+            MaxResultCount = 1000,
             SkipCount = 0,
             Sorting = nameof(CourseDto.Code) + " ASC"
         });

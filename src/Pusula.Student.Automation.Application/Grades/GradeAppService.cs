@@ -14,6 +14,7 @@ using EnrollmentEntity = Pusula.Student.Automation.Enrollments.Enrollment;
 using GradeEntity = Pusula.Student.Automation.Grades.Grade;
 using StudentEntity = Pusula.Student.Automation.Students.Student;
 using TeacherEntity = Pusula.Student.Automation.Teachers.Teacher;
+using Pusula.Student.Automation.Grades.Dtos;
 
 namespace Pusula.Student.Automation.Grades
 {
@@ -176,7 +177,6 @@ namespace Pusula.Student.Automation.Grades
                 query = query.Where(x => x.Enrollment.StudentId == myStudentId);
             }
 
-            // Basit default sıralama
             query = query.OrderBy(x => x.Enrollment.CourseId).ThenBy(x => x.Grade.Id);
 
             var total = await AsyncExecuter.CountAsync(query);
@@ -211,6 +211,71 @@ namespace Pusula.Student.Automation.Grades
             var entity = await Repository.GetAsync(id);
             await EnsureGradeAccessibleAsync(entity);
             await base.DeleteAsync(id);
+        }
+
+        // ------------------------------
+        // NEW: UPSERT (delete + insert)
+        // ------------------------------
+        public async Task<GradeDto> UpsertAsync(UpsertGradeDto input)
+        {
+            // önce bu enrollment'a yazma yetkimiz var mı bak
+            await EnsureEnrollmentAccessibleAsync(input.EnrollmentId);
+
+            // bu enrollment için bir not var mı?
+            var existing = await Repository.FirstOrDefaultAsync(
+                g => g.EnrollmentId == input.EnrollmentId
+            );
+
+            if (existing != null)
+            {
+                // mevcut kayda erişimi de kontrol et
+                await EnsureGradeAccessibleAsync(existing);
+                // setter'lar private olduğu için güncelleyemiyoruz, o yüzden siliyoruz
+                await Repository.DeleteAsync(existing);
+            }
+
+            // yeni kaydı oluştur
+            var grade = new GradeEntity(
+                GuidGenerator.Create(),
+                input.EnrollmentId,
+                input.Score,
+                input.Note
+            );
+
+            await Repository.InsertAsync(grade, autoSave: true);
+            return ObjectMapper.Map<GradeEntity, GradeDto>(grade);
+        }
+
+        // ------------------------------
+        // NEW: GetListByCourseAsync
+        // ------------------------------
+        public async Task<List<GradeDto>> GetListByCourseAsync(Guid courseId)
+        {
+            var gq = await Repository.GetQueryableAsync();
+            var eq = await _enrollmentRepository.GetQueryableAsync();
+
+            var query =
+                from g in gq
+                join e in eq on g.EnrollmentId equals e.Id
+                where e.CourseId == courseId
+                select new { Grade = g, Enrollment = e };
+
+            if (IsTeacherUser)
+            {
+                var myCourseIds = await GetCurrentTeacherCourseIdsAsync();
+                if (!myCourseIds.Contains(courseId))
+                    throw new AbpAuthorizationException("You are not allowed to see grades of this course.");
+            }
+
+            if (IsStudentUser)
+            {
+                var myStudentId = await GetCurrentStudentIdOrThrowAsync();
+                query = query.Where(x => x.Enrollment.StudentId == myStudentId);
+            }
+
+            var list = await AsyncExecuter.ToListAsync(query);
+            var gradeList = list.Select(x => x.Grade).ToList();
+            return ObjectMapper.Map<List<GradeEntity>, List<GradeDto>>(gradeList);
         }
     }
 }

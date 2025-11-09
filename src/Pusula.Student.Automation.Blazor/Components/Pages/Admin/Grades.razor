@@ -3,14 +3,17 @@
 @attribute [Authorize(AutomationPermissions.Grades.Default)]
 
 @using Microsoft.AspNetCore.Authorization
-@using Volo.Abp.Authorization                   @* IsGrantedAsync extension *@
 @using Pusula.Student.Automation.Courses
 @using Pusula.Student.Automation.Enrollments
 @using Pusula.Student.Automation.Students
+@using Pusula.Student.Automation.Grades
+@using Pusula.Student.Automation.Grades.Dtos
 @using Volo.Abp.Application.Dtos
+
 @inject ICourseAppService CoursesApp
 @inject IEnrollmentAppService EnrollmentsApp
 @inject IStudentAppService StudentsApp
+@inject IGradeAppService GradesApp
 @inject IAuthorizationService AuthorizationService
 
 <h3 class="mb-3">Grades</h3>
@@ -31,6 +34,10 @@
 @if (!string.IsNullOrWhiteSpace(_error))
 {
     <div class="alert alert-danger">@_error</div>
+}
+@if (!string.IsNullOrWhiteSpace(_success))
+{
+    <div class="alert alert-success py-2">@_success</div>
 }
 
 @if (_loading)
@@ -61,14 +68,19 @@ else
                 <tr>
                     <td>@StudentLabel(r.StudentId)</td>
                     <td style="max-width:140px;">
-                        <InputNumber class="form-control" @bind-Value="r.Score" disabled="@(!_canEdit)" />
+                        <InputNumber class="form-control"
+                                     @bind-Value="r.Score"
+                                     disabled="@(!_canEdit)" />
                     </td>
                     <td class="text-nowrap">
                         @if (_canEdit)
                         {
                             <button class="btn btn-sm btn-secondary" @onclick="() => ResetRow(r)">Reset</button>
-                            <button class="btn btn-sm btn-primary ms-2" disabled title="Backend wiring pending">Save</button>
-                            @* ileride: @onclick="() => SaveRowAsync(r)" *@
+                            <button class="btn btn-sm btn-primary ms-2"
+                                    @onclick="() => SaveRowAsync(r)"
+                                    disabled="@_saving">
+                                @(_saving && _savingRowId == r.EnrollmentId ? "Saving..." : "Save")
+                            </button>
                         }
                     </td>
                 </tr>
@@ -78,18 +90,21 @@ else
 }
 
 @code {
-    // permissions
     private bool _canCreate, _canEdit, _canDelete;
 
-    // data
     private List<CourseDto> _courses = new();
     private Guid _selectedCourseId = Guid.Empty;
 
     private bool _loading;
     private string _error = string.Empty;
+    private string _success = string.Empty;
+
+    private bool _saving = false;
+    private Guid _savingRowId = Guid.Empty;
 
     private List<GradeRowVm> _rows = new();
     private List<StudentDto> _students = new();
+    private List<EnrollmentDto> _enrollmentsForCourse = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -119,7 +134,7 @@ else
     {
         var list = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto
         {
-            MaxResultCount = 5000,
+            MaxResultCount = 1000,
             Sorting = nameof(StudentDto.FirstName) + " ASC"
         });
         _students = list.Items.ToList();
@@ -136,6 +151,7 @@ else
     private async Task OnCourseChanged(ChangeEventArgs _)
     {
         _error = string.Empty;
+        _success = string.Empty;
         _rows.Clear();
 
         if (_selectedCourseId == Guid.Empty)
@@ -153,20 +169,30 @@ else
         {
             _loading = true;
 
+            // 1) bu derse kayıtlı öğrenciler (enrollments)
             var enrollments = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto
             {
-                MaxResultCount = 5000
+                MaxResultCount = 1000
             });
 
-            var courseEnrolls = enrollments.Items
+            _enrollmentsForCourse = enrollments.Items
                 .Where(e => e.CourseId == _selectedCourseId)
                 .ToList();
 
-            _rows = courseEnrolls.Select(e => new GradeRowVm
+            // 2) bu dersin notları (yeni endpoint)
+            var grades = await GradesApp.GetListByCourseAsync(_selectedCourseId);
+            var gradeDict = grades.ToDictionary(g => g.EnrollmentId, g => g);
+
+            // 3) tabloyu doldur
+            _rows = _enrollmentsForCourse.Select(e =>
             {
-                EnrollmentId = e.Id,
-                StudentId = e.StudentId,
-                Score = 0
+                gradeDict.TryGetValue(e.Id, out var g);
+                return new GradeRowVm
+                {
+                    EnrollmentId = e.Id,
+                    StudentId = e.StudentId,
+                    Score = g?.Score ?? 0
+                };
             }).ToList();
         }
         catch (Exception ex)
@@ -179,13 +205,45 @@ else
         }
     }
 
-    private void ResetRow(GradeRowVm r) => r.Score = 0;
+    private void ResetRow(GradeRowVm r)
+    {
+        r.Score = 0;
+        _success = string.Empty;
+    }
 
-    // private async Task SaveRowAsync(GradeRowVm r)
-    // {
-    //     if (!_canEdit) return;
-    //     await GradesApp.UpsertAsync(new UpsertGradeDto { EnrollmentId = r.EnrollmentId, Score = r.Score });
-    // }
+    private async Task SaveRowAsync(GradeRowVm r)
+    {
+        if (!_canEdit)
+            return;
+
+        _saving = true;
+        _savingRowId = r.EnrollmentId;
+        _error = string.Empty;
+        _success = string.Empty;
+
+        try
+        {
+            var dto = new UpsertGradeDto
+            {
+                EnrollmentId = r.EnrollmentId,
+                Score = r.Score,
+                Note = string.Empty
+            };
+
+            await GradesApp.UpsertAsync(dto);
+
+            _success = "Grade saved.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+            _savingRowId = Guid.Empty;
+        }
+    }
 
     private class GradeRowVm
     {

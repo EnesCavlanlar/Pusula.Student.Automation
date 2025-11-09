@@ -1,0 +1,137 @@
+﻿@page "/student/my-attendance"
+@using Pusula.Student.Automation.Permissions
+@attribute [Authorize(AutomationPermissions.Attendances.Default)]
+
+@using Microsoft.AspNetCore.Authorization
+@using Pusula.Student.Automation.Attendances
+@using Pusula.Student.Automation.Courses
+@using Pusula.Student.Automation.Enrollments
+@using Volo.Abp.Application.Dtos
+
+@inject IAttendanceAppService AttendanceApp
+@inject ICourseAppService CoursesApp
+@inject IEnrollmentAppService EnrollmentsApp
+
+<h3 class="mb-3">My Attendance</h3>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (_loading)
+{
+    <p>Loading...</p>
+}
+else if (_rows.Count == 0)
+{
+    <div class="alert alert-info">No attendance records.</div>
+}
+else
+{
+    <table class="table table-striped align-middle">
+        <thead>
+            <tr>
+                <th style="width: 240px;">Course</th>
+                <th style="width: 150px;">Date</th>
+                <th style="width: 120px;">Present</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in _rows)
+            {
+                <tr>
+                    <td>@CourseLabel(r.CourseId)</td>
+                    <td>@r.Date.ToString("yyyy-MM-dd")</td>
+                    <td>
+                        @if (r.IsPresent)
+                        {
+                            <span class="badge bg-success">Present</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-danger">Absent</span>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool _loading = true;
+    private string _error = string.Empty;
+
+    private List<CourseDto> _courses = new();
+    private List<EnrollmentDto> _enrollments = new();
+    private List<RowVm> _rows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _loading = true;
+
+            // 1) kurslar
+            var courseList = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000
+            });
+            _courses = courseList.Items.ToList();
+
+            // 2) enrollments (öğrencinin gördüğü zaten backend’de filtreli)
+            var enrollList = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000
+            });
+            _enrollments = enrollList.Items.ToList();
+
+            // 3) attendance kayıtları
+            var attList = await AttendanceApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000,
+                Sorting = "Date DESC"
+            });
+
+            _rows = attList.Items
+                .Select(a =>
+                {
+                    var enr = _enrollments.FirstOrDefault(e => e.Id == a.EnrollmentId);
+                    return new RowVm
+                    {
+                        CourseId = enr?.CourseId ?? Guid.Empty,
+                        Date = a.Date,
+                        IsPresent = a.IsPresent
+                    };
+                })
+                .OrderByDescending(r => r.Date)
+                .ThenBy(r => CourseLabel(r.CourseId))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private string CourseLabel(Guid courseId)
+    {
+        if (courseId == Guid.Empty)
+            return "—";
+
+        var c = _courses.FirstOrDefault(x => x.Id == courseId);
+        return c is null ? "—" : $"{c.Code} - {c.Name}";
+    }
+
+    private class RowVm
+    {
+        public Guid CourseId { get; set; }
+        public DateTime Date { get; set; }
+        public bool IsPresent { get; set; }
+    }
+}
