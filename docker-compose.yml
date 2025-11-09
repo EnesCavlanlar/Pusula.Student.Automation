@@ -14,6 +14,8 @@ services:
       - "5442:5432"
     volumes:
       - pgdata_psa:/var/lib/postgresql/data
+    networks:
+      - automation-net
 
   pgadmin:
     image: dpage/pgadmin4:8
@@ -27,6 +29,59 @@ services:
       - "5080:80"
     depends_on:
       - postgres
+    networks:
+      - automation-net
+
+  # --- Redis (projende kullandık, compose'a da alalım) ---
+  redis:
+    image: redis:7-alpine
+    container_name: psa-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - automation-net
+
+  # --- Elasticsearch ---
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    container_name: psa-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    networks:
+      - automation-net
+
+  # --- Kibana ---
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.0
+    container_name: psa-kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - automation-net
+
+  # --- RabbitMQ (management'li) ---
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: psa-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"    # uygulama buradan bağlanacak
+      - "15672:15672"  # web arayüz
+    networks:
+      - automation-net
+
+networks:
+  automation-net:
+    driver: bridge
 
 volumes:
   pgdata_psa:

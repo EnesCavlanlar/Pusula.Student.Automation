@@ -3,21 +3,22 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Caching.Distributed;              // ⬅ cache
+using Microsoft.Extensions.Caching.Distributed;              // cache
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Authorization;
-using Volo.Abp.Caching;                                      // ⬅ cache
+using Volo.Abp.Caching;                                      // cache
 using Volo.Abp.Domain.Repositories;
 using CourseEntity = Pusula.Student.Automation.Courses.Course;
 using EnrollmentEntity = Pusula.Student.Automation.Enrollments.Enrollment;
-// ----- Entity alias'ları (namespace/isim çakışmasını önler) -----
+// ----- Entity alias'ları -----
 using GradeEntity = Pusula.Student.Automation.Grades.Grade;
 using StudentEntity = Pusula.Student.Automation.Students.Student;
 using TeacherEntity = Pusula.Student.Automation.Teachers.Teacher;
 using Pusula.Student.Automation.Grades.Dtos;
-using Pusula.Student.Automation.Caching;                     // ⬅ bizim cache item'lar
+using Pusula.Student.Automation.Caching;                     // cache item'lar
+using Pusula.Student.Automation.Messaging;                   // ⬅ RabbitMQ publisher
 
 namespace Pusula.Student.Automation.Grades
 {
@@ -35,9 +36,10 @@ namespace Pusula.Student.Automation.Grades
         private readonly IRepository<CourseEntity, Guid> _courseRepository;
         private readonly IRepository<EnrollmentEntity, Guid> _enrollmentRepository;
 
-        // ⬅ yeni: cache'ler
         private readonly IDistributedCache<StudentGradesCacheItem> _studentGradesCache;
         private readonly IDistributedCache<CourseStudentsCacheItem> _courseStudentsCache;
+        private readonly IRabbitMqEventPublisher _rabbit;          // ⬅ yeni
+
         private const int StudentGradesCacheSeconds = 60;
 
         public GradeAppService(
@@ -46,8 +48,9 @@ namespace Pusula.Student.Automation.Grades
             IRepository<StudentEntity, Guid> studentRepository,
             IRepository<CourseEntity, Guid> courseRepository,
             IRepository<EnrollmentEntity, Guid> enrollmentRepository,
-            IDistributedCache<StudentGradesCacheItem> studentGradesCache,     // ⬅ yeni
-            IDistributedCache<CourseStudentsCacheItem> courseStudentsCache    // ⬅ yeni
+            IDistributedCache<StudentGradesCacheItem> studentGradesCache,
+            IDistributedCache<CourseStudentsCacheItem> courseStudentsCache,
+            IRabbitMqEventPublisher rabbitMqEventPublisher          // ⬅ yeni
         ) : base(repository)
         {
             _teacherRepository = teacherRepository;
@@ -56,6 +59,7 @@ namespace Pusula.Student.Automation.Grades
             _enrollmentRepository = enrollmentRepository;
             _studentGradesCache = studentGradesCache;
             _courseStudentsCache = courseStudentsCache;
+            _rabbit = rabbitMqEventPublisher;                       // ⬅ yeni
 
             GetPolicyName = AutomationPermissions.Grades.Default;
             GetListPolicyName = AutomationPermissions.Grades.Default;
@@ -64,18 +68,14 @@ namespace Pusula.Student.Automation.Grades
             DeletePolicyName = AutomationPermissions.Grades.Delete;
         }
 
-        // ------------------------------
         // cache key helpers
-        // ------------------------------
         private static string BuildStudentGradesCacheKey(Guid studentId)
             => $"student:{studentId}:grades";
 
         private static string BuildCourseStudentsCacheKey(Guid courseId)
             => $"course:{courseId}:students";
 
-        // ------------------------------
-        // Role/ownership helpers
-        // ------------------------------
+        // role helpers
         private bool IsTeacherUser => CurrentUser?.Roles?.Contains("Teacher") == true;
         private bool IsStudentUser => CurrentUser?.Roles?.Contains("Student") == true;
 
@@ -130,7 +130,6 @@ namespace Pusula.Student.Automation.Grades
 
         private async Task EnsureGradeAccessibleAsync(GradeEntity grade)
         {
-            // Grade -> Enrollment -> (CourseId, StudentId)
             var enrollment = await _enrollmentRepository.GetAsync(grade.EnrollmentId);
 
             if (IsTeacherUser)
@@ -161,14 +160,11 @@ namespace Pusula.Student.Automation.Grades
 
             if (IsStudentUser)
             {
-                // Öğrenciler yazma işlemi yapamaz; yine de savunmacı kontrol
                 throw new AbpAuthorizationException("Students are not allowed to modify grades.");
             }
         }
 
-        // ------------------------------
         // READ
-        // ------------------------------
         public override async Task<GradeDto> GetAsync(Guid id)
         {
             var entity = await Repository.GetAsync(id);
@@ -201,25 +197,20 @@ namespace Pusula.Student.Automation.Grades
             query = query.OrderBy(x => x.Enrollment.CourseId).ThenBy(x => x.Grade.Id);
 
             var total = await AsyncExecuter.CountAsync(query);
-            var page = await AsyncExecuter.ToListAsync(
-                query.Skip(input.SkipCount).Take(input.MaxResultCount)
-            );
+            var page = await AsyncExecuter.ToListAsync(query.Skip(input.SkipCount).Take(input.MaxResultCount));
 
             var gradeList = page.Select(x => x.Grade).ToList();
             var dtoItems = ObjectMapper.Map<List<GradeEntity>, List<GradeDto>>(gradeList);
             return new PagedResultDto<GradeDto>(total, dtoItems);
         }
 
-        // ------------------------------
-        // NEW: Öğrencinin notlarını cache'li getir
-        // ------------------------------
+        // Öğrencinin notlarını cache'li getir
         public async Task<List<GradeDto>> GetByStudentAsync(Guid studentId)
         {
             var cacheKey = BuildStudentGradesCacheKey(studentId);
 
-            // 1) önce redis
             var cached = await _studentGradesCache.GetAsync(cacheKey);
-            if (cached != null && cached.GradeIds != null && cached.GradeIds.Count > 0)
+            if (cached != null && cached.GradeIds is { Count: > 0 })
             {
                 var gq = await Repository.GetQueryableAsync();
                 var eq = await _enrollmentRepository.GetQueryableAsync();
@@ -233,7 +224,7 @@ namespace Pusula.Student.Automation.Grades
                 return ObjectMapper.Map<List<GradeEntity>, List<GradeDto>>(list);
             }
 
-            // 2) cache yoksa db
+            // cache yoksa
             var gq2 = await Repository.GetQueryableAsync();
             var eq2 = await _enrollmentRepository.GetQueryableAsync();
 
@@ -246,7 +237,6 @@ namespace Pusula.Student.Automation.Grades
             var allGrades = await AsyncExecuter.ToListAsync(query2);
             var dtos = ObjectMapper.Map<List<GradeEntity>, List<GradeDto>>(allGrades);
 
-            // 3) cache’e yaz
             var toCache = new StudentGradesCacheItem
             {
                 StudentId = studentId,
@@ -259,76 +249,62 @@ namespace Pusula.Student.Automation.Grades
                 new DistributedCacheEntryOptions
                 {
                     AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(StudentGradesCacheSeconds)
-                }
-            );
+                });
 
             return dtos;
         }
 
-        // ------------------------------
-        // WRITE
-        // ------------------------------
+        // CREATE
         public override async Task<GradeDto> CreateAsync(CreateUpdateGradeDto input)
         {
-            // önce yetkileri kontrol et
             await EnsureEnrollmentAccessibleAsync(input.EnrollmentId);
 
-            // ilgili enrollment'i al ki öğrenci ve ders idsini bilelim
             var enrollment = await _enrollmentRepository.GetAsync(input.EnrollmentId);
 
             var dto = await base.CreateAsync(input);
 
-            // öğrencinin not cache'ini sil
+            // cache temizle
             if (enrollment.StudentId != Guid.Empty)
-            {
                 await _studentGradesCache.RemoveAsync(BuildStudentGradesCacheKey(enrollment.StudentId));
-            }
 
-            // dersin öğrenci listesi cache'ini de istersen sil (dashboard hesapları için)
             if (enrollment.CourseId != Guid.Empty)
-            {
                 await _courseStudentsCache.RemoveAsync(BuildCourseStudentsCacheKey(enrollment.CourseId));
-            }
+
+            // RabbitMQ'ya da gönder
+            await _rabbit.PublishGradeCreatedAsync(enrollment.Id, input.Score, input.Note);
 
             return dto;
         }
 
+        // UPDATE
         public override async Task<GradeDto> UpdateAsync(Guid id, CreateUpdateGradeDto input)
         {
             var entity = await Repository.GetAsync(id);
-            await EnsureGradeAccessibleAsync(entity);                 // mevcut kayda erişim
-            await EnsureEnrollmentAccessibleAsync(input.EnrollmentId); // hedefe yetki
+            await EnsureGradeAccessibleAsync(entity);
+            await EnsureEnrollmentAccessibleAsync(input.EnrollmentId);
 
-            // eski enrollment'i alalım ki eski öğrenci/ders cache'ini silebilelim
             var oldEnrollment = await _enrollmentRepository.GetAsync(entity.EnrollmentId);
             var newEnrollment = await _enrollmentRepository.GetAsync(input.EnrollmentId);
 
             var dto = await base.UpdateAsync(id, input);
 
-            // eski öğrenci cache'i
             if (oldEnrollment.StudentId != Guid.Empty)
-            {
                 await _studentGradesCache.RemoveAsync(BuildStudentGradesCacheKey(oldEnrollment.StudentId));
-            }
-            // yeni öğrenci farklıysa onun da cache'i
             if (newEnrollment.StudentId != Guid.Empty && newEnrollment.StudentId != oldEnrollment.StudentId)
-            {
                 await _studentGradesCache.RemoveAsync(BuildStudentGradesCacheKey(newEnrollment.StudentId));
-            }
 
-            // ders tarafı
             if (oldEnrollment.CourseId != Guid.Empty)
-            {
                 await _courseStudentsCache.RemoveAsync(BuildCourseStudentsCacheKey(oldEnrollment.CourseId));
-            }
             if (newEnrollment.CourseId != Guid.Empty && newEnrollment.CourseId != oldEnrollment.CourseId)
-            {
                 await _courseStudentsCache.RemoveAsync(BuildCourseStudentsCacheKey(newEnrollment.CourseId));
-            }
+
+            // event
+            await _rabbit.PublishGradeCreatedAsync(newEnrollment.Id, input.Score, input.Note);
 
             return dto;
         }
 
+        // DELETE
         public override async Task DeleteAsync(Guid id)
         {
             var entity = await Repository.GetAsync(id);
@@ -338,41 +314,27 @@ namespace Pusula.Student.Automation.Grades
 
             await base.DeleteAsync(id);
 
-            // öğrenci cache'i sil
             if (enrollment.StudentId != Guid.Empty)
-            {
                 await _studentGradesCache.RemoveAsync(BuildStudentGradesCacheKey(enrollment.StudentId));
-            }
 
-            // ders cache'i sil
             if (enrollment.CourseId != Guid.Empty)
-            {
                 await _courseStudentsCache.RemoveAsync(BuildCourseStudentsCacheKey(enrollment.CourseId));
-            }
         }
 
-        // ------------------------------
-        // NEW: UPSERT (delete + insert)
-        // ------------------------------
+        // UPSERT
         public async Task<GradeDto> UpsertAsync(UpsertGradeDto input)
         {
-            // önce bu enrollment'a yazma yetkimiz var mı bak
             await EnsureEnrollmentAccessibleAsync(input.EnrollmentId);
 
             var enrollment = await _enrollmentRepository.GetAsync(input.EnrollmentId);
 
-            // bu enrollment için bir not var mı?
-            var existing = await Repository.FirstOrDefaultAsync(
-                g => g.EnrollmentId == input.EnrollmentId
-            );
-
+            var existing = await Repository.FirstOrDefaultAsync(g => g.EnrollmentId == input.EnrollmentId);
             if (existing != null)
             {
                 await EnsureGradeAccessibleAsync(existing);
                 await Repository.DeleteAsync(existing);
             }
 
-            // yeni kaydı oluştur
             var grade = new GradeEntity(
                 GuidGenerator.Create(),
                 input.EnrollmentId,
@@ -382,22 +344,18 @@ namespace Pusula.Student.Automation.Grades
 
             await Repository.InsertAsync(grade, autoSave: true);
 
-            // cache’leri temizle
             if (enrollment.StudentId != Guid.Empty)
-            {
                 await _studentGradesCache.RemoveAsync(BuildStudentGradesCacheKey(enrollment.StudentId));
-            }
             if (enrollment.CourseId != Guid.Empty)
-            {
                 await _courseStudentsCache.RemoveAsync(BuildCourseStudentsCacheKey(enrollment.CourseId));
-            }
+
+            // ⬅ RabbitMQ
+            await _rabbit.PublishGradeCreatedAsync(enrollment.Id, input.Score, input.Note);
 
             return ObjectMapper.Map<GradeEntity, GradeDto>(grade);
         }
 
-        // ------------------------------
-        // NEW: GetListByCourseAsync
-        // ------------------------------
+        // ders bazlı liste
         public async Task<List<GradeDto>> GetListByCourseAsync(Guid courseId)
         {
             var gq = await Repository.GetQueryableAsync();
