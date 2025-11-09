@@ -1,6 +1,9 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
+using Pusula.Student.Automation.Enrollments.Dtos;
 
 namespace Pusula.Student.Automation.Enrollments
 {
@@ -11,5 +14,7 @@ namespace Pusula.Student.Automation.Enrollments
             PagedAndSortedResultRequestDto,
             CreateEnrollmentDto>
     {
+        // öğretmenin seçtiği dersteki öğrencileri getir
+        Task<List<CourseStudentDto>> GetStudentsByCourseAsync(Guid courseId);
     }
 }

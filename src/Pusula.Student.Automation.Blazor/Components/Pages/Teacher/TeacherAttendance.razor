@@ -1,0 +1,242 @@
+﻿@page "/teacher/attendance"
+
+@using Pusula.Student.Automation.Permissions
+@attribute [Authorize(AutomationPermissions.Attendances.Default)]
+
+@using Microsoft.AspNetCore.Authorization
+@using Pusula.Student.Automation.Courses
+@using Pusula.Student.Automation.Enrollments
+@using Pusula.Student.Automation.Students
+@using Pusula.Student.Automation.Attendances
+@using Pusula.Student.Automation.Attendances.Dtos
+@using Volo.Abp.Application.Dtos
+
+@inject ICourseAppService CoursesApp
+@inject IEnrollmentAppService EnrollmentsApp
+@inject IStudentAppService StudentsApp
+@inject IAttendanceAppService AttendanceApp
+@inject IAuthorizationService AuthorizationService
+
+<h3 class="mb-3">Bugünün Yoklaması</h3>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-6">
+        <label class="form-label">Ders</label>
+        <InputSelect class="form-select" @bind-Value="_selectedCourseId" @onchange="OnCourseChanged">
+            <option value="@Guid.Empty">— Ders seçin —</option>
+            @foreach (var c in _courses)
+            {
+                <option value="@c.Id">@c.Code - @c.Name</option>
+            }
+        </InputSelect>
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Tarih</label>
+        <InputDate class="form-control" @bind-Value="_date" />
+    </div>
+    <div class="col-md-3 d-flex align-items-end">
+        <button class="btn btn-outline-primary w-100"
+                @onclick="LoadGridAsync"
+                disabled="@(_selectedCourseId == Guid.Empty)">
+            Listele
+        </button>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+@if (!string.IsNullOrWhiteSpace(_success))
+{
+    <div class="alert alert-success py-2">@_success</div>
+}
+
+@if (_loading)
+{
+    <p>Yükleniyor...</p>
+}
+else if (_selectedCourseId == Guid.Empty)
+{
+    <p class="text-muted">Yoklama alacağınız dersi seçin.</p>
+}
+else if (_rows.Count == 0)
+{
+    <div class="alert alert-info">Bu derse kayıtlı öğrenci yok.</div>
+}
+else
+{
+    <div class="d-flex gap-2 mb-2">
+        <button class="btn btn-sm btn-success" @onclick="CheckAll">Hepsini işaretle</button>
+        <button class="btn btn-sm btn-secondary" @onclick="UncheckAll">Temizle</button>
+        <button class="btn btn-sm btn-primary ms-auto" @onclick="SaveAsync" disabled="@_saving">
+            @(_saving ? "Kaydediliyor..." : "Kaydet")
+        </button>
+    </div>
+
+    <table class="table table-striped align-middle">
+        <thead>
+            <tr>
+                <th>Öğrenci</th>
+                <th style="width:140px;">Katıldı</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in _rows)
+            {
+                <tr>
+                    <td>@StudentLabel(r.StudentId)</td>
+                    <td>
+                        <input class="form-check-input" type="checkbox" @bind="r.Present" />
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<CourseDto> _courses = new();
+    private Guid _selectedCourseId = Guid.Empty;
+
+    private DateTime _date = DateTime.Today;
+    private bool _loading;
+    private bool _saving;
+    private string _error = string.Empty;
+    private string _success = string.Empty;
+
+    private List<StudentDto> _students = new();
+    private List<RowVm> _rows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCoursesAsync();
+        await LoadStudentsAsync();
+    }
+
+    private async Task LoadCoursesAsync()
+    {
+        var list = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto
+        {
+            MaxResultCount = 1000,
+            Sorting = nameof(CourseDto.Code) + " ASC"
+        });
+        _courses = list.Items.ToList();
+    }
+
+    private async Task LoadStudentsAsync()
+    {
+        var list = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+        {
+            MaxResultCount = 1000,
+            Sorting = nameof(StudentDto.FirstName) + " ASC"
+        });
+        _students = list.Items.ToList();
+    }
+
+    private string StudentLabel(Guid id)
+    {
+        var s = _students.FirstOrDefault(x => x.Id == id);
+        if (s is null) return "—";
+        var no = string.IsNullOrWhiteSpace(s.StudentNo) ? "" : $" [{s.StudentNo}]";
+        return $"{s.FirstName} {s.LastName}{no}";
+    }
+
+    private async Task OnCourseChanged(ChangeEventArgs _)
+    {
+        _error = string.Empty;
+        _success = string.Empty;
+        _rows.Clear();
+
+        if (_selectedCourseId == Guid.Empty)
+        {
+            StateHasChanged();
+            return;
+        }
+
+        await LoadGridAsync();
+    }
+
+    private async Task LoadGridAsync()
+    {
+        try
+        {
+            _loading = true;
+            _error = string.Empty;
+            _success = string.Empty;
+
+            var enrolls = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000
+            });
+
+            var courseEnrolls = enrolls.Items
+                .Where(e => e.CourseId == _selectedCourseId)
+                .ToList();
+
+            var attendanceForDay = await AttendanceApp.GetListByCourseAndDateAsync(_selectedCourseId, _date.Date);
+            var attDict = attendanceForDay.ToDictionary(a => a.EnrollmentId, a => a);
+
+            _rows = courseEnrolls.Select(e =>
+            {
+                attDict.TryGetValue(e.Id, out var a);
+                return new RowVm
+                {
+                    EnrollmentId = e.Id,
+                    StudentId = e.StudentId,
+                    Present = a?.IsPresent ?? false
+                };
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        _error = string.Empty;
+        _success = string.Empty;
+
+        try
+        {
+            foreach (var r in _rows)
+            {
+                var dto = new UpsertAttendanceDto
+                {
+                    EnrollmentId = r.EnrollmentId,
+                    Date = _date.Date,
+                    IsPresent = r.Present
+                };
+
+                await AttendanceApp.UpsertAsync(dto);
+            }
+
+            _success = "Yoklama kaydedildi.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void CheckAll() => _rows.ForEach(r => r.Present = true);
+    private void UncheckAll() => _rows.ForEach(r => r.Present = false);
+
+    private class RowVm
+    {
+        public Guid EnrollmentId { get; set; }
+        public Guid StudentId { get; set; }
+        public bool Present { get; set; }
+    }
+}

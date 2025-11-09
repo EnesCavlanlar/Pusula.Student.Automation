@@ -1,19 +1,17 @@
 ﻿@page "/student/my-grades"
+
 @using Pusula.Student.Automation.Permissions
 @attribute [Authorize(AutomationPermissions.Grades.Default)]
 
-@using Microsoft.AspNetCore.Authorization
-@using Pusula.Student.Automation.Grades
-@using Pusula.Student.Automation.Grades.Dtos
-@using Pusula.Student.Automation.Courses
-@using Pusula.Student.Automation.Enrollments
 @using Volo.Abp.Application.Dtos
-
+@using Pusula.Student.Automation.Grades
+@using Pusula.Student.Automation.Enrollments
+@using Pusula.Student.Automation.Courses
 @inject IGradeAppService GradesApp
-@inject ICourseAppService CoursesApp
 @inject IEnrollmentAppService EnrollmentsApp
+@inject ICourseAppService CoursesApp
 
-<h3 class="mb-3">My Grades</h3>
+<h3 class="mb-3">Notlarım</h3>
 
 @if (!string.IsNullOrWhiteSpace(_error))
 {
@@ -22,27 +20,27 @@
 
 @if (_loading)
 {
-    <p>Loading...</p>
+    <p>Yükleniyor...</p>
 }
 else if (_rows.Count == 0)
 {
-    <div class="alert alert-info">No grades yet.</div>
+    <div class="alert alert-info">Henüz notlanmış dersiniz bulunmuyor.</div>
 }
 else
 {
     <table class="table table-striped align-middle">
         <thead>
             <tr>
-                <th style="width: 240px;">Course</th>
-                <th style="width: 90px;">Score</th>
-                <th>Note</th>
+                <th>Ders</th>
+                <th style="width:140px;">Not</th>
+                <th>Açıklama</th>
             </tr>
         </thead>
         <tbody>
             @foreach (var r in _rows)
             {
                 <tr>
-                    <td>@CourseLabel(r.CourseId)</td>
+                    <td>@r.CourseName</td>
                     <td>@r.Score</td>
                     <td>@r.Note</td>
                 </tr>
@@ -52,52 +50,56 @@ else
 }
 
 @code {
-    private bool _loading = true;
+    private bool _loading;
     private string _error = string.Empty;
-
-    private List<CourseDto> _courses = new();
-    private List<EnrollmentDto> _enrollments = new();
-    private List<RowVm> _rows = new();
+    private List<MyGradeVm> _rows = new();
 
     protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
     {
         try
         {
             _loading = true;
+            _error = string.Empty;
 
-            // 1) kursları çek
-            var courseList = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto
-            {
-                MaxResultCount = 1000
-            });
-            _courses = courseList.Items.ToList();
-
-            // 2) enrollments (kurs-id'yi buradan alacağız)
-            var enrollList = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto
-            {
-                MaxResultCount = 1000
-            });
-            _enrollments = enrollList.Items.ToList();
-
-            // 3) notlar
-            var gradeList = await GradesApp.GetListAsync(new PagedAndSortedResultRequestDto
+            // öğrenci rolünde bu zaten sadece kendisininkini dönecek
+            var grades = await GradesApp.GetListAsync(new PagedAndSortedResultRequestDto
             {
                 MaxResultCount = 1000
             });
 
-            _rows = gradeList.Items
-                .Select(g =>
+            // ders adlarını göstermek için enrollments + courses alıyoruz
+            var enrollments = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000
+            });
+
+            var courses = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000
+            });
+
+            var enrollmentDict = enrollments.Items.ToDictionary(e => e.Id, e => e);
+            var courseDict = courses.Items.ToDictionary(c => c.Id, c => c);
+
+            _rows = grades.Items.Select(g =>
+            {
+                enrollmentDict.TryGetValue(g.EnrollmentId, out var e);
+                string courseName = "—";
+                if (e != null && courseDict.TryGetValue(e.CourseId, out var c))
+                    courseName = $"{c.Code} - {c.Name}";
+
+                return new MyGradeVm
                 {
-                    var enr = _enrollments.FirstOrDefault(e => e.Id == g.EnrollmentId);
-                    return new RowVm
-                    {
-                        CourseId = enr?.CourseId ?? Guid.Empty,
-                        Score = g.Score,   // DTO'da Score dedik
-                        Note = g.Note
-                    };
-                })
-                .OrderBy(r => CourseLabel(r.CourseId))
-                .ToList();
+                    CourseName = courseName,
+                    Score = g.Score,
+                    Note = g.Note
+                };
+            }).OrderBy(x => x.CourseName).ToList();
         }
         catch (Exception ex)
         {
@@ -109,18 +111,9 @@ else
         }
     }
 
-    private string CourseLabel(Guid courseId)
+    private class MyGradeVm
     {
-        if (courseId == Guid.Empty)
-            return "—";
-
-        var c = _courses.FirstOrDefault(x => x.Id == courseId);
-        return c is null ? "—" : $"{c.Code} - {c.Name}";
-    }
-
-    private class RowVm
-    {
-        public Guid CourseId { get; set; }
+        public string CourseName { get; set; } = string.Empty;
         public int Score { get; set; }
         public string? Note { get; set; }
     }

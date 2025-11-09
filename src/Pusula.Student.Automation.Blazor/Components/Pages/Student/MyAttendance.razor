@@ -1,18 +1,17 @@
 ﻿@page "/student/my-attendance"
+
 @using Pusula.Student.Automation.Permissions
 @attribute [Authorize(AutomationPermissions.Attendances.Default)]
 
-@using Microsoft.AspNetCore.Authorization
-@using Pusula.Student.Automation.Attendances
-@using Pusula.Student.Automation.Courses
-@using Pusula.Student.Automation.Enrollments
 @using Volo.Abp.Application.Dtos
-
+@using Pusula.Student.Automation.Attendances
+@using Pusula.Student.Automation.Enrollments
+@using Pusula.Student.Automation.Courses
 @inject IAttendanceAppService AttendanceApp
-@inject ICourseAppService CoursesApp
 @inject IEnrollmentAppService EnrollmentsApp
+@inject ICourseAppService CoursesApp
 
-<h3 class="mb-3">My Attendance</h3>
+<h3 class="mb-3">Yoklamalarım</h3>
 
 @if (!string.IsNullOrWhiteSpace(_error))
 {
@@ -21,36 +20,36 @@
 
 @if (_loading)
 {
-    <p>Loading...</p>
+    <p>Yükleniyor...</p>
 }
 else if (_rows.Count == 0)
 {
-    <div class="alert alert-info">No attendance records.</div>
+    <div class="alert alert-info">Yoklama kaydınız bulunmuyor.</div>
 }
 else
 {
     <table class="table table-striped align-middle">
         <thead>
             <tr>
-                <th style="width: 240px;">Course</th>
-                <th style="width: 150px;">Date</th>
-                <th style="width: 120px;">Present</th>
+                <th style="width:220px;">Ders</th>
+                <th style="width:150px;">Tarih</th>
+                <th>Durum</th>
             </tr>
         </thead>
         <tbody>
             @foreach (var r in _rows)
             {
                 <tr>
-                    <td>@CourseLabel(r.CourseId)</td>
-                    <td>@r.Date.ToString("yyyy-MM-dd")</td>
+                    <td>@r.CourseName</td>
+                    <td>@r.Date.ToString("dd.MM.yyyy")</td>
                     <td>
                         @if (r.IsPresent)
                         {
-                            <span class="badge bg-success">Present</span>
+                            <span class="badge bg-success">Katıldı</span>
                         }
                         else
                         {
-                            <span class="badge bg-danger">Absent</span>
+                            <span class="badge bg-danger">Katılmadı</span>
                         }
                     </td>
                 </tr>
@@ -60,54 +59,59 @@ else
 }
 
 @code {
-    private bool _loading = true;
+    private bool _loading;
     private string _error = string.Empty;
-
-    private List<CourseDto> _courses = new();
-    private List<EnrollmentDto> _enrollments = new();
-    private List<RowVm> _rows = new();
+    private List<MyAttendanceVm> _rows = new();
 
     protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
     {
         try
         {
             _loading = true;
+            _error = string.Empty;
 
-            // 1) kurslar
-            var courseList = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto
-            {
-                MaxResultCount = 1000
-            });
-            _courses = courseList.Items.ToList();
-
-            // 2) enrollments (öğrencinin gördüğü zaten backend’de filtreli)
-            var enrollList = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto
-            {
-                MaxResultCount = 1000
-            });
-            _enrollments = enrollList.Items.ToList();
-
-            // 3) attendance kayıtları
-            var attList = await AttendanceApp.GetListAsync(new PagedAndSortedResultRequestDto
+            // öğrenci rolünde sadece kendisininkini dönecek
+            var attendances = await AttendanceApp.GetListAsync(new PagedAndSortedResultRequestDto
             {
                 MaxResultCount = 1000,
                 Sorting = "Date DESC"
             });
 
-            _rows = attList.Items
-                .Select(a =>
+            var enrollments = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000
+            });
+
+            var courses = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000
+            });
+
+            var enrollmentDict = enrollments.Items.ToDictionary(e => e.Id, e => e);
+            var courseDict = courses.Items.ToDictionary(c => c.Id, c => c);
+
+            _rows = attendances.Items.Select(a =>
+            {
+                enrollmentDict.TryGetValue(a.EnrollmentId, out var e);
+                string courseName = "—";
+                if (e != null && courseDict.TryGetValue(e.CourseId, out var c))
+                    courseName = $"{c.Code} - {c.Name}";
+
+                return new MyAttendanceVm
                 {
-                    var enr = _enrollments.FirstOrDefault(e => e.Id == a.EnrollmentId);
-                    return new RowVm
-                    {
-                        CourseId = enr?.CourseId ?? Guid.Empty,
-                        Date = a.Date,
-                        IsPresent = a.IsPresent
-                    };
-                })
-                .OrderByDescending(r => r.Date)
-                .ThenBy(r => CourseLabel(r.CourseId))
-                .ToList();
+                    CourseName = courseName,
+                    Date = a.Date,
+                    IsPresent = a.IsPresent
+                };
+            })
+            .OrderByDescending(x => x.Date)
+            .ThenBy(x => x.CourseName)
+            .ToList();
         }
         catch (Exception ex)
         {
@@ -119,18 +123,9 @@ else
         }
     }
 
-    private string CourseLabel(Guid courseId)
+    private class MyAttendanceVm
     {
-        if (courseId == Guid.Empty)
-            return "—";
-
-        var c = _courses.FirstOrDefault(x => x.Id == courseId);
-        return c is null ? "—" : $"{c.Code} - {c.Name}";
-    }
-
-    private class RowVm
-    {
-        public Guid CourseId { get; set; }
+        public string CourseName { get; set; } = string.Empty;
         public DateTime Date { get; set; }
         public bool IsPresent { get; set; }
     }

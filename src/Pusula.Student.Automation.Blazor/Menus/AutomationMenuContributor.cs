@@ -8,6 +8,7 @@ using Volo.Abp.Identity.Blazor;
 using Volo.Abp.SettingManagement.Blazor.Menus;
 using Volo.Abp.TenantManagement.Blazor.Navigation;
 using Volo.Abp.UI.Navigation;
+using Volo.Abp.Users; // <-- eklendi
 
 namespace Pusula.Student.Automation.Blazor.Menus
 {
@@ -18,35 +19,38 @@ namespace Pusula.Student.Automation.Blazor.Menus
             if (context.Menu.Name != StandardMenus.Main)
                 return;
 
-            var l = context.GetLocalizer<AutomationResource>();
-            var checker = context.ServiceProvider.GetRequiredService<IPermissionChecker>();
+            var sp = context.ServiceProvider;
+            var checker = sp.GetRequiredService<IPermissionChecker>();
+            var currentUser = sp.GetRequiredService<ICurrentUser>();
 
-            // ---------- Home ----------
+            // rol bayrakları
+            var isAdmin = currentUser.IsInRole("admin");
+            var isTeacher = currentUser.IsInRole("teacher");
+            var isStudent = currentUser.IsInRole("student");
+
+            // Home
             context.Menu.Items.Insert(
                 0,
                 new ApplicationMenuItem(
                     AutomationMenus.Home,
-                    "Ana Sayfa",
+                    "Home",
                     url: "/",
                     icon: "fas fa-home",
                     order: 1
                 )
             );
 
-            // Kullanıcının rolünü izinlerden yakalayacağız
-            var isAdmin = await checker.IsGrantedAsync(AutomationPermissions.Students.Default)
-                          && await checker.IsGrantedAsync(AutomationPermissions.Teachers.Default);
-            // Çok kaba bir ayrım ama bizim senaryoya yeter.
-            var isTeacher = !isAdmin && await checker.IsGrantedAsync(AutomationPermissions.Courses.Default);
-            var isStudent = !isAdmin && !isTeacher;
-
+            // ana grup
             var automation = new ApplicationMenuItem(
                 name: "Automation",
-                displayName: "Öğrenci Otomasyonu",
+                displayName: "Öğrenci Otomasyon",
                 icon: "fa fa-graduation-cap",
                 order: 10
             );
 
+            //
+            // 1) ADMIN BLOĞU – sadece admin rolü görsün
+            //
             if (isAdmin)
             {
                 await AddIfGrantedAsync(
@@ -79,56 +83,91 @@ namespace Pusula.Student.Automation.Blazor.Menus
                     name: "Automation.Attendance", display: "Yoklama",
                     url: "/admin/attendance", icon: "fa fa-calendar-check", order: 6);
             }
-            else if (isTeacher)
+
+            //
+            // 2) TEACHER BLOĞU – teacher veya admin görsün
+            //
+            if (isTeacher || isAdmin)
             {
-                automation.AddItem(new ApplicationMenuItem(
-                    name: "Automation.TeacherMyCourses",
-                    displayName: "Derslerim",
-                    url: "/teacher/my-courses",
-                    icon: "fa fa-laptop-code",
-                    order: 1
-                ));
+                if (await checker.IsGrantedAsync(AutomationPermissions.Courses.Default))
+                {
+                    automation.AddItem(new ApplicationMenuItem(
+                        name: "Automation.TeacherMyCourses",
+                        displayName: "Derslerim",
+                        url: "/teacher/my-courses",
+                        icon: "fa fa-laptop",
+                        order: 20
+                    ));
+                }
 
-                // yeni not girişi sayfamız
-                automation.AddItem(new ApplicationMenuItem(
-                    name: "Automation.TeacherGradeEntry",
-                    displayName: "Not Girişi",
-                    url: "/teacher/grade-entry",
-                    icon: "fa fa-percent",
-                    order: 2
-                ));
+                if (await checker.IsGrantedAsync(AutomationPermissions.Enrollments.Default))
+                {
+                    automation.AddItem(new ApplicationMenuItem(
+                        name: "Automation.TeacherCourseStudents",
+                        displayName: "Ders Öğrencilerim",
+                        url: "/teacher/course-students",
+                        icon: "fa fa-users",
+                        order: 21
+                    ));
+                }
 
-                automation.AddItem(new ApplicationMenuItem(
-                    name: "Automation.TeacherAttendance",
-                    displayName: "Yoklama",
-                    url: "/admin/attendance",      // aynı ekranı kullanıyoruz
-                    icon: "fa fa-calendar-check",
-                    order: 3
-                ));
+                if (await checker.IsGrantedAsync(AutomationPermissions.Grades.Default))
+                {
+                    automation.AddItem(new ApplicationMenuItem(
+                        name: "Automation.TeacherGrades",
+                        displayName: "Not Girişi",
+                        url: "/teacher/grades",
+                        icon: "fa fa-pen",
+                        order: 22
+                    ));
+                }
+
+                if (await checker.IsGrantedAsync(AutomationPermissions.Attendances.Default))
+                {
+                    automation.AddItem(new ApplicationMenuItem(
+                        name: "Automation.TeacherAttendance",
+                        displayName: "Bugünün Yoklaması",
+                        url: "/teacher/attendance",
+                        icon: "fa fa-calendar-day",
+                        order: 23
+                    ));
+                }
             }
-            else if (isStudent)
-            {
-                automation.AddItem(new ApplicationMenuItem(
-                    name: "Automation.MyGrades",
-                    displayName: "Notlarım",
-                    url: "/student/my-grades",
-                    icon: "fa fa-user-graduate",
-                    order: 1
-                ));
 
-                automation.AddItem(new ApplicationMenuItem(
-                    name: "Automation.MyAttendance",
-                    displayName: "Yoklamalarım",
-                    url: "/student/my-attendance",
-                    icon: "fa fa-calendar-day",
-                    order: 2
-                ));
+            //
+            // 3) STUDENT BLOĞU – student veya admin görsün
+            //
+            if (isStudent || isAdmin)
+            {
+                if (await checker.IsGrantedAsync(AutomationPermissions.Grades.Default))
+                {
+                    automation.AddItem(new ApplicationMenuItem(
+                        name: "Automation.MyGrades",
+                        displayName: "Notlarım",
+                        url: "/student/my-grades",
+                        icon: "fa fa-user-graduate",
+                        order: 30
+                    ));
+                }
+
+                if (await checker.IsGrantedAsync(AutomationPermissions.Attendances.Default))
+                {
+                    automation.AddItem(new ApplicationMenuItem(
+                        name: "Automation.MyAttendance",
+                        displayName: "Yoklamalarım",
+                        url: "/student/my-attendance",
+                        icon: "fa fa-calendar-day",
+                        order: 31
+                    ));
+                }
             }
 
             if (automation.Items.Count > 0)
+            {
                 context.Menu.AddItem(automation);
+            }
 
-            // ----- Administration -----
+            // ABP default admin menüsü
             var administration = context.Menu.GetAdministration();
             administration.Order = 99;
 
