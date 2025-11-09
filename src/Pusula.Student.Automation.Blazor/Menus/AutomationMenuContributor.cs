@@ -8,7 +8,6 @@ using Volo.Abp.Identity.Blazor;
 using Volo.Abp.SettingManagement.Blazor.Menus;
 using Volo.Abp.TenantManagement.Blazor.Navigation;
 using Volo.Abp.UI.Navigation;
-using Volo.Abp.Users;
 
 namespace Pusula.Student.Automation.Blazor.Menus
 {
@@ -21,128 +20,115 @@ namespace Pusula.Student.Automation.Blazor.Menus
 
             var l = context.GetLocalizer<AutomationResource>();
             var checker = context.ServiceProvider.GetRequiredService<IPermissionChecker>();
-            var currentUser = context.ServiceProvider.GetRequiredService<ICurrentUser>();
 
             // ---------- Home ----------
             context.Menu.Items.Insert(
                 0,
                 new ApplicationMenuItem(
                     AutomationMenus.Home,
-                    l["Menu:Home"],
+                    "Ana Sayfa",
                     url: "/",
                     icon: "fas fa-home",
                     order: 1
                 )
             );
 
-            // ortak grup
+            // Kullanıcının rolünü izinlerden yakalayacağız
+            var isAdmin = await checker.IsGrantedAsync(AutomationPermissions.Students.Default)
+                          && await checker.IsGrantedAsync(AutomationPermissions.Teachers.Default);
+            // Çok kaba bir ayrım ama bizim senaryoya yeter.
+            var isTeacher = !isAdmin && await checker.IsGrantedAsync(AutomationPermissions.Courses.Default);
+            var isStudent = !isAdmin && !isTeacher;
+
             var automation = new ApplicationMenuItem(
                 name: "Automation",
-                displayName: l["Menu:Automation"] ?? "Automation",
+                displayName: "Öğrenci Otomasyonu",
                 icon: "fa fa-graduation-cap",
                 order: 10
             );
 
-            // =============== ADMIN MENÜSÜ ===============
-            if (currentUser.IsInRole("admin"))
+            if (isAdmin)
             {
                 await AddIfGrantedAsync(
                     automation, checker, AutomationPermissions.Students.Default,
-                    name: "Automation.Students", display: l["Menu:Students"] ?? "Students",
+                    name: "Automation.Students", display: "Öğrenciler",
                     url: "/admin/students", icon: "fa fa-users", order: 1);
 
                 await AddIfGrantedAsync(
                     automation, checker, AutomationPermissions.Teachers.Default,
-                    name: "Automation.Teachers", display: l["Menu:Teachers"] ?? "Teachers",
+                    name: "Automation.Teachers", display: "Öğretmenler",
                     url: "/admin/teachers", icon: "fa fa-chalkboard-teacher", order: 2);
 
                 await AddIfGrantedAsync(
                     automation, checker, AutomationPermissions.Courses.Default,
-                    name: "Automation.Courses", display: l["Menu:Courses"] ?? "Courses",
+                    name: "Automation.Courses", display: "Dersler",
                     url: "/admin/courses", icon: "fa fa-book", order: 3);
 
                 await AddIfGrantedAsync(
                     automation, checker, AutomationPermissions.Enrollments.Default,
-                    name: "Automation.Enrollments", display: l["Menu:Enrollments"] ?? "Enrollments",
+                    name: "Automation.Enrollments", display: "Ders Kayıtları",
                     url: "/admin/enrollments", icon: "fa fa-link", order: 4);
 
                 await AddIfGrantedAsync(
                     automation, checker, AutomationPermissions.Grades.Default,
-                    name: "Automation.Grades", display: l["Menu:Grades"] ?? "Grades",
+                    name: "Automation.Grades", display: "Notlar",
                     url: "/admin/grades", icon: "fa fa-percent", order: 5);
 
                 await AddIfGrantedAsync(
                     automation, checker, AutomationPermissions.Attendances.Default,
-                    name: "Automation.Attendance", display: l["Menu:Attendance"] ?? "Attendance",
+                    name: "Automation.Attendance", display: "Yoklama",
                     url: "/admin/attendance", icon: "fa fa-calendar-check", order: 6);
             }
-            // =============== TEACHER MENÜSÜ ===============
-            else if (currentUser.IsInRole("teacher"))
+            else if (isTeacher)
             {
-                // kendi dersleri
                 automation.AddItem(new ApplicationMenuItem(
                     name: "Automation.TeacherMyCourses",
-                    displayName: l["Menu:TeacherMyCourses"] ?? "My Courses",
+                    displayName: "Derslerim",
                     url: "/teacher/my-courses",
-                    icon: "fa fa-chalkboard",
+                    icon: "fa fa-laptop-code",
                     order: 1
                 ));
 
-                // not girişi ekranı
-                if (await checker.IsGrantedAsync(AutomationPermissions.Grades.Default))
-                {
-                    automation.AddItem(new ApplicationMenuItem(
-                        name: "Automation.Grades",
-                        displayName: l["Menu:Grades"] ?? "Grades",
-                        url: "/admin/grades",
-                        icon: "fa fa-percent",
-                        order: 2
-                    ));
-                }
+                // yeni not girişi sayfamız
+                automation.AddItem(new ApplicationMenuItem(
+                    name: "Automation.TeacherGradeEntry",
+                    displayName: "Not Girişi",
+                    url: "/teacher/grade-entry",
+                    icon: "fa fa-percent",
+                    order: 2
+                ));
 
-                // yoklama girişi
-                if (await checker.IsGrantedAsync(AutomationPermissions.Attendances.Default))
-                {
-                    automation.AddItem(new ApplicationMenuItem(
-                        name: "Automation.Attendance",
-                        displayName: l["Menu:Attendance"] ?? "Attendance",
-                        url: "/admin/attendance",
-                        icon: "fa fa-calendar-check",
-                        order: 3
-                    ));
-                }
+                automation.AddItem(new ApplicationMenuItem(
+                    name: "Automation.TeacherAttendance",
+                    displayName: "Yoklama",
+                    url: "/admin/attendance",      // aynı ekranı kullanıyoruz
+                    icon: "fa fa-calendar-check",
+                    order: 3
+                ));
             }
-            // =============== STUDENT MENÜSÜ ===============
-            else if (currentUser.IsInRole("student"))
+            else if (isStudent)
             {
-                if (await checker.IsGrantedAsync(AutomationPermissions.Grades.Default))
-                {
-                    automation.AddItem(new ApplicationMenuItem(
-                        name: "Automation.MyGrades",
-                        displayName: l["Menu:MyGrades"] ?? "My Grades",
-                        url: "/student/my-grades",
-                        icon: "fa fa-user-graduate",
-                        order: 1
-                    ));
-                }
+                automation.AddItem(new ApplicationMenuItem(
+                    name: "Automation.MyGrades",
+                    displayName: "Notlarım",
+                    url: "/student/my-grades",
+                    icon: "fa fa-user-graduate",
+                    order: 1
+                ));
 
-                if (await checker.IsGrantedAsync(AutomationPermissions.Attendances.Default))
-                {
-                    automation.AddItem(new ApplicationMenuItem(
-                        name: "Automation.MyAttendance",
-                        displayName: l["Menu:MyAttendance"] ?? "My Attendance",
-                        url: "/student/my-attendance",
-                        icon: "fa fa-calendar-day",
-                        order: 2
-                    ));
-                }
+                automation.AddItem(new ApplicationMenuItem(
+                    name: "Automation.MyAttendance",
+                    displayName: "Yoklamalarım",
+                    url: "/student/my-attendance",
+                    icon: "fa fa-calendar-day",
+                    order: 2
+                ));
             }
 
-            // boş değilse ekle
             if (automation.Items.Count > 0)
                 context.Menu.AddItem(automation);
 
-            // ---------- Administration (ABP default) ----------
+            // ----- Administration -----
             var administration = context.Menu.GetAdministration();
             administration.Order = 99;
 

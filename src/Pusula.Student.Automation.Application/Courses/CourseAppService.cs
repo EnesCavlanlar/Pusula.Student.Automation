@@ -54,8 +54,6 @@ namespace Pusula.Student.Automation.Courses
             if (userId == null)
                 throw new AbpAuthorizationException("Current user is not authenticated.");
 
-            // EF bağımlılığına girmeden, tüm öğretmenleri çekip
-            // UserId/IdentityUserId gibi muhtemel alan adlarını reflection ile kontrol edelim.
             var teachers = await _teacherRepository.GetListAsync();
 
             Guid? GetLinkedUserId(object t)
@@ -104,7 +102,6 @@ namespace Pusula.Student.Automation.Courses
                 query = query.Where(c => c.TeacherId == currentTeacherId);
             }
 
-            // Basit default sıralama (Dynamic.Core gerektirmez)
             query = query.OrderBy(c => c.Code);
 
             var total = await AsyncExecuter.CountAsync(query);
@@ -149,6 +146,24 @@ namespace Pusula.Student.Automation.Courses
             var entity = await Repository.GetAsync(id);
             await EnsureOwnerAsync(entity);
             await base.DeleteAsync(id);
+        }
+
+        // ------------------------------
+        // NEW: öğretmenin kendi dersleri
+        // ------------------------------
+        public async Task<List<CourseDto>> GetMyCoursesAsync()
+        {
+            // öğretmense sadece kendi dersleri
+            if (IsTeacherUser)
+            {
+                var currentTeacherId = await GetCurrentTeacherIdOrThrowAsync();
+                var list = await Repository.GetListAsync(c => c.TeacherId == currentTeacherId);
+                return ObjectMapper.Map<List<CourseEntity>, List<CourseDto>>(list);
+            }
+
+            // admin / başka rol ise hepsini dönebilir
+            var all = await Repository.GetListAsync();
+            return ObjectMapper.Map<List<CourseEntity>, List<CourseDto>>(all);
         }
     }
 }

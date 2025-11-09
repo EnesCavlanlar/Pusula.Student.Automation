@@ -1,0 +1,197 @@
+﻿@page "/teacher/grade-entry"
+@using Pusula.Student.Automation.Courses
+@using Pusula.Student.Automation.Enrollments
+@using Pusula.Student.Automation.Students
+@using Pusula.Student.Automation.Grades
+@using Pusula.Student.Automation.Grades.Dtos
+@using Volo.Abp.Application.Dtos
+
+@inject ICourseAppService CoursesApp
+@inject IEnrollmentAppService EnrollmentsApp
+@inject IStudentAppService StudentsApp
+@inject IGradeAppService GradesApp
+
+<h3 class="mb-3">Not Girişi</h3>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-6">
+        <label class="form-label">Ders</label>
+        <InputSelect class="form-select" @bind-Value="_selectedCourseId" @onchange="OnCourseChanged">
+            <option value="@Guid.Empty">— Ders seç —</option>
+            @foreach (var c in _courses)
+            {
+                <option value="@c.Id">@c.Code - @c.Name</option>
+            }
+        </InputSelect>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (_loading)
+{
+    <p>Yükleniyor...</p>
+}
+else if (_selectedCourseId == Guid.Empty)
+{
+    <p class="text-muted">Lütfen ders seçin.</p>
+}
+else if (_rows.Count == 0)
+{
+    <div class="alert alert-info">Bu derse kayıtlı öğrenci yok.</div>
+}
+else
+{
+    <table class="table table-striped align-middle">
+        <thead>
+            <tr>
+                <th style="width:300px;">Öğrenci</th>
+                <th style="width:120px;">Not (0–100)</th>
+                <th style="width:140px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in _rows)
+            {
+                <tr>
+                    <td>@StudentLabel(r.StudentId)</td>
+                    <td>
+                        <InputNumber class="form-control" @bind-Value="r.Score" />
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-primary" @onclick="() => SaveRowAsync(r)">Kaydet</button>
+                        <button class="btn btn-sm btn-secondary ms-2" @onclick="() => ResetRow(r)">Sıfırla</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<CourseDto> _courses = new();
+    private Guid _selectedCourseId = Guid.Empty;
+
+    private bool _loading;
+    private string _error = string.Empty;
+
+    private List<StudentDto> _students = new();
+    private List<GradeRowVm> _rows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadMyCoursesAsync();
+        await LoadStudentsAsync();
+    }
+
+    private async Task LoadMyCoursesAsync()
+    {
+        var list = await CoursesApp.GetMyCoursesAsync();
+        _courses = list;
+    }
+
+    private async Task LoadStudentsAsync()
+    {
+        var list = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+        {
+            MaxResultCount = 1000,
+            Sorting = nameof(StudentDto.FirstName) + " ASC"
+        });
+        _students = list.Items.ToList();
+    }
+
+    private string StudentLabel(Guid id)
+    {
+        var s = _students.FirstOrDefault(x => x.Id == id);
+        return s == null ? "—" : $"{s.FirstName} {s.LastName}";
+    }
+
+    private async Task OnCourseChanged(ChangeEventArgs _)
+    {
+        _error = string.Empty;
+        _rows.Clear();
+
+        if (_selectedCourseId == Guid.Empty)
+        {
+            StateHasChanged();
+            return;
+        }
+
+        await LoadGridAsync();
+    }
+
+    private async Task LoadGridAsync()
+    {
+        try
+        {
+            _loading = true;
+
+            var enrollments = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000
+            });
+
+            var courseEnrolls = enrollments.Items
+                .Where(e => e.CourseId == _selectedCourseId)
+                .ToList();
+
+            // mevcut notlar
+            var grades = await GradesApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000
+            });
+
+            var gradeDict = grades.Items.ToDictionary(g => g.EnrollmentId, g => g);
+
+            _rows = courseEnrolls.Select(e =>
+            {
+                gradeDict.TryGetValue(e.Id, out var g);
+                return new GradeRowVm
+                {
+                    EnrollmentId = e.Id,
+                    StudentId = e.StudentId,
+                    Score = g?.Score ?? 0,
+                    Note = g?.Note
+                };
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void ResetRow(GradeRowVm r) => r.Score = 0;
+
+    private async Task SaveRowAsync(GradeRowVm r)
+    {
+        try
+        {
+            await GradesApp.UpsertAsync(new UpsertGradeDto
+            {
+                EnrollmentId = r.EnrollmentId,
+                Score = r.Score,
+                Note = r.Note
+            });
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private class GradeRowVm
+    {
+        public Guid EnrollmentId { get; set; }
+        public Guid StudentId { get; set; }
+        public int Score { get; set; }
+        public string? Note { get; set; }
+    }
+}
