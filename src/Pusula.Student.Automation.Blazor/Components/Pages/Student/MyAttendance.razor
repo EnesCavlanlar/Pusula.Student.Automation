@@ -1,15 +1,19 @@
 ﻿@page "/student/my-attendance"
-
 @using Pusula.Student.Automation.Permissions
 @attribute [Authorize(AutomationPermissions.Attendances.Default)]
 
-@using Volo.Abp.Application.Dtos
-@using Pusula.Student.Automation.Attendances
-@using Pusula.Student.Automation.Enrollments
+@using Microsoft.AspNetCore.Authorization
 @using Pusula.Student.Automation.Courses
+@using Pusula.Student.Automation.Enrollments
+@using Pusula.Student.Automation.Attendances
+@using Pusula.Student.Automation.Students
+@using Volo.Abp.Application.Dtos
+
 @inject IAttendanceAppService AttendanceApp
 @inject IEnrollmentAppService EnrollmentsApp
 @inject ICourseAppService CoursesApp
+@inject IStudentAppService StudentsApp
+@inject IAuthorizationService AuthorizationService
 
 <h3 class="mb-3">Yoklamalarım</h3>
 
@@ -20,27 +24,29 @@
 
 @if (_loading)
 {
-    <p>Yükleniyor...</p>
+    <p>Yükleniyor…</p>
 }
 else if (_rows.Count == 0)
 {
-    <div class="alert alert-info">Yoklama kaydınız bulunmuyor.</div>
+    <div class="alert alert-info">Henüz yoklama kaydınız yok.</div>
 }
 else
 {
     <table class="table table-striped align-middle">
         <thead>
             <tr>
-                <th style="width:220px;">Ders</th>
-                <th style="width:150px;">Tarih</th>
-                <th>Durum</th>
+                <th style="width: 240px;">Ders</th>
+                <th style="width: 230px;">Öğrenci</th>
+                <th style="width: 140px;">Tarih</th>
+                <th style="width: 120px;">Durum</th>
             </tr>
         </thead>
         <tbody>
             @foreach (var r in _rows)
             {
                 <tr>
-                    <td>@r.CourseName</td>
+                    <td>@r.CourseLabel</td>
+                    <td>@r.StudentName</td>
                     <td>@r.Date.ToString("dd.MM.yyyy")</td>
                     <td>
                         @if (r.IsPresent)
@@ -59,59 +65,74 @@ else
 }
 
 @code {
-    private bool _loading;
+    private bool _loading = true;
     private string _error = string.Empty;
-    private List<MyAttendanceVm> _rows = new();
+
+    private List<CourseDto> _courses = new();
+    private List<StudentDto> _students = new();
+    private List<EnrollmentDto> _enrollments = new();
+
+    private readonly List<RowVm> _rows = new();
 
     protected override async Task OnInitializedAsync()
-    {
-        await LoadAsync();
-    }
-
-    private async Task LoadAsync()
     {
         try
         {
             _loading = true;
-            _error = string.Empty;
 
-            // öğrenci rolünde sadece kendisininkini dönecek
-            var attendances = await AttendanceApp.GetListAsync(new PagedAndSortedResultRequestDto
+            // 1) Dersler
+            var cList = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000,
+                Sorting = nameof(CourseDto.Code) + " ASC"
+            });
+            _courses = cList.Items.ToList();
+
+            // 2) Öğrenciler (içinden sadece bu kullanıcının mapping’ini kullanacağız)
+            var sList = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000,
+                Sorting = nameof(StudentDto.FirstName) + " ASC"
+            });
+            _students = sList.Items.ToList();
+
+            // 3) Enrollments
+            var eList = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000
+            });
+            _enrollments = eList.Items.ToList();
+
+            // 4) Yoklamalar (backend zaten "sadece bu öğrenci" diye filtreliyor)
+            var aList = await AttendanceApp.GetListAsync(new PagedAndSortedResultRequestDto
             {
                 MaxResultCount = 1000,
                 Sorting = "Date DESC"
             });
 
-            var enrollments = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+            _rows.Clear();
+
+            foreach (var a in aList.Items.OrderByDescending(x => x.Date))
             {
-                MaxResultCount = 1000
-            });
+                var enroll = _enrollments.FirstOrDefault(e => e.Id == a.EnrollmentId);
+                if (enroll == null) continue;
 
-            var courses = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto
-            {
-                MaxResultCount = 1000
-            });
+                var course = _courses.FirstOrDefault(c => c.Id == enroll.CourseId);
+                var student = _students.FirstOrDefault(s => s.Id == enroll.StudentId);
 
-            var enrollmentDict = enrollments.Items.ToDictionary(e => e.Id, e => e);
-            var courseDict = courses.Items.ToDictionary(c => c.Id, c => c);
+                var studentName = student is null
+                    ? "—"
+                    : $"{student.FirstName} {student.LastName}" +
+                      (string.IsNullOrWhiteSpace(student.StudentNo) ? "" : $" [{student.StudentNo}]");
 
-            _rows = attendances.Items.Select(a =>
-            {
-                enrollmentDict.TryGetValue(a.EnrollmentId, out var e);
-                string courseName = "—";
-                if (e != null && courseDict.TryGetValue(e.CourseId, out var c))
-                    courseName = $"{c.Code} - {c.Name}";
-
-                return new MyAttendanceVm
+                _rows.Add(new RowVm
                 {
-                    CourseName = courseName,
+                    CourseLabel = course is null ? "—" : $"{course.Code} - {course.Name}",
+                    StudentName = studentName,
                     Date = a.Date,
                     IsPresent = a.IsPresent
-                };
-            })
-            .OrderByDescending(x => x.Date)
-            .ThenBy(x => x.CourseName)
-            .ToList();
+                });
+            }
         }
         catch (Exception ex)
         {
@@ -123,9 +144,10 @@ else
         }
     }
 
-    private class MyAttendanceVm
+    private sealed class RowVm
     {
-        public string CourseName { get; set; } = string.Empty;
+        public string CourseLabel { get; set; } = "";
+        public string StudentName { get; set; } = "";
         public DateTime Date { get; set; }
         public bool IsPresent { get; set; }
     }

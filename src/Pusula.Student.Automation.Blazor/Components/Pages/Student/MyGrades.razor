@@ -1,15 +1,19 @@
 ﻿@page "/student/my-grades"
-
 @using Pusula.Student.Automation.Permissions
 @attribute [Authorize(AutomationPermissions.Grades.Default)]
 
-@using Volo.Abp.Application.Dtos
-@using Pusula.Student.Automation.Grades
-@using Pusula.Student.Automation.Enrollments
+@using Microsoft.AspNetCore.Authorization
 @using Pusula.Student.Automation.Courses
+@using Pusula.Student.Automation.Enrollments
+@using Pusula.Student.Automation.Grades
+@using Pusula.Student.Automation.Students
+@using Volo.Abp.Application.Dtos
+
 @inject IGradeAppService GradesApp
 @inject IEnrollmentAppService EnrollmentsApp
 @inject ICourseAppService CoursesApp
+@inject IStudentAppService StudentsApp
+@inject IAuthorizationService AuthorizationService
 
 <h3 class="mb-3">Notlarım</h3>
 
@@ -20,19 +24,20 @@
 
 @if (_loading)
 {
-    <p>Yükleniyor...</p>
+    <p>Yükleniyor…</p>
 }
 else if (_rows.Count == 0)
 {
-    <div class="alert alert-info">Henüz notlanmış dersiniz bulunmuyor.</div>
+    <div class="alert alert-info">Henüz notunuz yok.</div>
 }
 else
 {
     <table class="table table-striped align-middle">
         <thead>
             <tr>
-                <th>Ders</th>
-                <th style="width:140px;">Not</th>
+                <th style="width: 260px;">Ders</th>
+                <th style="width: 220px;">Öğrenci</th>
+                <th style="width: 120px;">Not</th>
                 <th>Açıklama</th>
             </tr>
         </thead>
@@ -40,7 +45,8 @@ else
             @foreach (var r in _rows)
             {
                 <tr>
-                    <td>@r.CourseName</td>
+                    <td>@r.CourseLabel</td>
+                    <td>@r.StudentName</td>
                     <td>@r.Score</td>
                     <td>@r.Note</td>
                 </tr>
@@ -50,56 +56,71 @@ else
 }
 
 @code {
-    private bool _loading;
+    private bool _loading = true;
     private string _error = string.Empty;
-    private List<MyGradeVm> _rows = new();
+
+    private List<CourseDto> _courses = new();
+    private List<StudentDto> _students = new();
+    private List<EnrollmentDto> _enrollments = new();
+
+    private readonly List<RowVm> _rows = new();
 
     protected override async Task OnInitializedAsync()
-    {
-        await LoadAsync();
-    }
-
-    private async Task LoadAsync()
     {
         try
         {
             _loading = true;
-            _error = string.Empty;
 
-            // öğrenci rolünde bu zaten sadece kendisininkini dönecek
-            var grades = await GradesApp.GetListAsync(new PagedAndSortedResultRequestDto
+            // Kurslar
+            var cList = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000,
+                Sorting = nameof(CourseDto.Code) + " ASC"
+            });
+            _courses = cList.Items.ToList();
+
+            // Öğrenciler (tek öğrenci olmalı ama güvenli tarafta kalalım)
+            var sList = await StudentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000,
+                Sorting = nameof(StudentDto.FirstName) + " ASC"
+            });
+            _students = sList.Items.ToList();
+
+            // Kayıtlar
+            var eList = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+            {
+                MaxResultCount = 1000
+            });
+            _enrollments = eList.Items.ToList();
+
+            // Notlar (backend student için sadece kendi notlarını döndürüyor)
+            var gList = await GradesApp.GetListAsync(new PagedAndSortedResultRequestDto
             {
                 MaxResultCount = 1000
             });
 
-            // ders adlarını göstermek için enrollments + courses alıyoruz
-            var enrollments = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto
+            _rows.Clear();
+            foreach (var g in gList.Items)
             {
-                MaxResultCount = 1000
-            });
+                var enroll = _enrollments.FirstOrDefault(e => e.Id == g.EnrollmentId);
+                if (enroll == null) continue;
 
-            var courses = await CoursesApp.GetListAsync(new PagedAndSortedResultRequestDto
-            {
-                MaxResultCount = 1000
-            });
+                var course = _courses.FirstOrDefault(c => c.Id == enroll.CourseId);
+                var student = _students.FirstOrDefault(s => s.Id == enroll.StudentId);
 
-            var enrollmentDict = enrollments.Items.ToDictionary(e => e.Id, e => e);
-            var courseDict = courses.Items.ToDictionary(c => c.Id, c => c);
-
-            _rows = grades.Items.Select(g =>
-            {
-                enrollmentDict.TryGetValue(g.EnrollmentId, out var e);
-                string courseName = "—";
-                if (e != null && courseDict.TryGetValue(e.CourseId, out var c))
-                    courseName = $"{c.Code} - {c.Name}";
-
-                return new MyGradeVm
+                _rows.Add(new RowVm
                 {
-                    CourseName = courseName,
+                    CourseLabel = course is null ? "—" : $"{course.Code} - {course.Name}",
+                    StudentName = student is null ? "—" : $"{student.FirstName} {student.LastName}" +
+                                  (string.IsNullOrWhiteSpace(student.StudentNo) ? "" : $" [{student.StudentNo}]"),
                     Score = g.Score,
                     Note = g.Note
-                };
-            }).OrderBy(x => x.CourseName).ToList();
+                });
+            }
+
+            // Görsel tutarlılık için sıralayalım
+            _rows.Sort((a, b) => string.Compare(a.CourseLabel, b.CourseLabel, StringComparison.Ordinal));
         }
         catch (Exception ex)
         {
@@ -111,9 +132,10 @@ else
         }
     }
 
-    private class MyGradeVm
+    private sealed class RowVm
     {
-        public string CourseName { get; set; } = string.Empty;
+        public string CourseLabel { get; set; } = "";
+        public string StudentName { get; set; } = "";
         public int Score { get; set; }
         public string? Note { get; set; }
     }

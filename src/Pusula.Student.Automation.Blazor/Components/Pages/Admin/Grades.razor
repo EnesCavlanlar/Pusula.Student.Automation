@@ -16,18 +16,25 @@
 @inject IGradeAppService GradesApp
 @inject IAuthorizationService AuthorizationService
 
-<h3 class="mb-3">Grades</h3>
+<h3 class="mb-3">Notlar (Admin)</h3>
 
 <div class="row g-3 mb-3">
     <div class="col-md-6">
-        <label class="form-label">Course</label>
+        <label class="form-label">Ders</label>
         <InputSelect class="form-select" @bind-Value="_selectedCourseId" @onchange="OnCourseChanged">
-            <option value="@Guid.Empty">— Select a course —</option>
+            <option value="@Guid.Empty">— Ders seç —</option>
             @foreach (var c in _courses)
             {
                 <option value="@c.Id">@c.Code - @c.Name</option>
             }
         </InputSelect>
+    </div>
+    <div class="col-md-3 d-flex align-items-end">
+        <button class="btn btn-outline-primary w-100"
+                @onclick="LoadGridAsync"
+                disabled="@(_selectedCourseId == Guid.Empty)">
+            Yenile
+        </button>
     </div>
 </div>
 
@@ -35,6 +42,7 @@
 {
     <div class="alert alert-danger">@_error</div>
 }
+
 @if (!string.IsNullOrWhiteSpace(_success))
 {
     <div class="alert alert-success py-2">@_success</div>
@@ -42,24 +50,33 @@
 
 @if (_loading)
 {
-    <p>Loading...</p>
+    <p>Yükleniyor...</p>
 }
 else if (_selectedCourseId == Guid.Empty)
 {
-    <p class="text-muted">Please select a course.</p>
+    <p class="text-muted">Lütfen bir ders seçin.</p>
 }
 else if (_rows.Count == 0)
 {
-    <div class="alert alert-info">No enrollments for this course.</div>
+    <div class="alert alert-info">Bu derse ait kayıtlı öğrenci yok.</div>
 }
 else
 {
+    <div class="d-flex mb-2">
+        @if (_canEdit)
+        {
+            <button class="btn btn-sm btn-primary ms-auto" @onclick="SaveAllAsync" disabled="@_saving">
+                @(_saving ? "Kaydediliyor..." : "Hepsini Kaydet")
+            </button>
+        }
+    </div>
+
     <table class="table table-striped align-middle">
         <thead>
             <tr>
-                <th style="width: 360px;">Student</th>
-                <th style="width: 140px;">Grade (0–100)</th>
-                <th style="width: 180px;">Actions</th>
+                <th>Öğrenci</th>
+                <th style="width: 140px;">Not (0–100)</th>
+                <th style="width: 220px;">Açıklama</th>
             </tr>
         </thead>
         <tbody>
@@ -67,21 +84,11 @@ else
             {
                 <tr>
                     <td>@StudentLabel(r.StudentId)</td>
-                    <td style="max-width:140px;">
-                        <InputNumber class="form-control"
-                                     @bind-Value="r.Score"
-                                     disabled="@(!_canEdit)" />
+                    <td>
+                        <InputNumber class="form-control" @bind-Value="r.Score" disabled="@(!_canEdit)" />
                     </td>
-                    <td class="text-nowrap">
-                        @if (_canEdit)
-                        {
-                            <button class="btn btn-sm btn-secondary" @onclick="() => ResetRow(r)">Reset</button>
-                            <button class="btn btn-sm btn-primary ms-2"
-                                    @onclick="() => SaveRowAsync(r)"
-                                    disabled="@_saving">
-                                @(_saving && _savingRowId == r.EnrollmentId ? "Saving..." : "Save")
-                            </button>
-                        }
+                    <td>
+                        <InputText class="form-control" @bind-Value="r.Note" disabled="@(!_canEdit)" />
                     </td>
                 </tr>
             }
@@ -93,18 +100,15 @@ else
     private bool _canCreate, _canEdit, _canDelete;
 
     private List<CourseDto> _courses = new();
+    private List<StudentDto> _students = new();
     private Guid _selectedCourseId = Guid.Empty;
 
     private bool _loading;
+    private bool _saving;
     private string _error = string.Empty;
     private string _success = string.Empty;
 
-    private bool _saving = false;
-    private Guid _savingRowId = Guid.Empty;
-
     private List<GradeRowVm> _rows = new();
-    private List<StudentDto> _students = new();
-    private List<EnrollmentDto> _enrollmentsForCourse = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -168,32 +172,41 @@ else
         try
         {
             _loading = true;
+            _error = string.Empty;
+            _success = string.Empty;
 
-            // 1) bu derse kayıtlı öğrenciler (enrollments)
+            // 1) bu derse ait enrollments
             var enrollments = await EnrollmentsApp.GetListAsync(new PagedAndSortedResultRequestDto
             {
                 MaxResultCount = 1000
             });
 
-            _enrollmentsForCourse = enrollments.Items
+            var courseEnrolls = enrollments.Items
                 .Where(e => e.CourseId == _selectedCourseId)
                 .ToList();
 
-            // 2) bu dersin notları (yeni endpoint)
-            var grades = await GradesApp.GetListByCourseAsync(_selectedCourseId);
-            var gradeDict = grades.ToDictionary(g => g.EnrollmentId, g => g);
-
-            // 3) tabloyu doldur
-            _rows = _enrollmentsForCourse.Select(e =>
+            // 2) mevcut notlar (hepsini çek, filtrele)
+            var gradeList = await GradesApp.GetListAsync(new PagedAndSortedResultRequestDto
             {
-                gradeDict.TryGetValue(e.Id, out var g);
+                MaxResultCount = 1000
+            });
+
+            var gradesForCourse = (from g in gradeList.Items
+                                   join e in courseEnrolls on g.EnrollmentId equals e.Id
+                                   select g).ToDictionary(x => x.EnrollmentId, x => x);
+
+            // 3) grid satırları
+            _rows = courseEnrolls.Select(e =>
+            {
+                gradesForCourse.TryGetValue(e.Id, out var g);
                 return new GradeRowVm
                 {
                     EnrollmentId = e.Id,
                     StudentId = e.StudentId,
-                    Score = g?.Score ?? 0
+                    Score = g?.Score ?? 0,
+                    Note = g?.Note ?? string.Empty
                 };
-            }).ToList();
+            }).OrderBy(x => StudentLabel(x.StudentId)).ToList();
         }
         catch (Exception ex)
         {
@@ -205,34 +218,30 @@ else
         }
     }
 
-    private void ResetRow(GradeRowVm r)
-    {
-        r.Score = 0;
-        _success = string.Empty;
-    }
-
-    private async Task SaveRowAsync(GradeRowVm r)
+    private async Task SaveAllAsync()
     {
         if (!_canEdit)
             return;
 
         _saving = true;
-        _savingRowId = r.EnrollmentId;
         _error = string.Empty;
         _success = string.Empty;
 
         try
         {
-            var dto = new UpsertGradeDto
+            foreach (var r in _rows)
             {
-                EnrollmentId = r.EnrollmentId,
-                Score = r.Score,
-                Note = string.Empty
-            };
+                var dto = new UpsertGradeDto
+                {
+                    EnrollmentId = r.EnrollmentId,
+                    Score = r.Score,
+                    Note = r.Note
+                };
 
-            await GradesApp.UpsertAsync(dto);
+                await GradesApp.UpsertAsync(dto);
+            }
 
-            _success = "Grade saved.";
+            _success = "Notlar kaydedildi.";
         }
         catch (Exception ex)
         {
@@ -241,7 +250,6 @@ else
         finally
         {
             _saving = false;
-            _savingRowId = Guid.Empty;
         }
     }
 
@@ -250,5 +258,6 @@ else
         public Guid EnrollmentId { get; set; }
         public Guid StudentId { get; set; }
         public int Score { get; set; }
+        public string Note { get; set; } = string.Empty;
     }
 }
